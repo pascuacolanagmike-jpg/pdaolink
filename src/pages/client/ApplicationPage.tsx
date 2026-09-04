@@ -37,6 +37,25 @@ const EMPTY: ApplicationInput = {
   physician_name: '', physician_license_no: '',
 }
 
+// Helper to convert Application (DB record) to ApplicationInput (form state)
+function toApplicationInput(app: Application): ApplicationInput {
+  const result: any = { ...EMPTY }
+  for (const key of Object.keys(EMPTY) as (keyof ApplicationInput)[]) {
+    const value = (app as any)[key]
+    if (value !== null && value !== undefined) {
+      if (Array.isArray(value)) {
+        result[key] = value
+      } else if (typeof value === 'string') {
+        result[key] = value
+      } else {
+        // in case there are other types (e.g., number, boolean) – keep as is
+        result[key] = value
+      }
+    }
+  }
+  return result
+}
+
 // 'Needs Revision' is intentionally excluded so clients can re-edit and resubmit
 const ACTIVE_STATUSES = ['Pending', 'Under Review', 'Approved', 'Ready for Pickup']
 const REVISION_STATUS = 'Needs Revision'
@@ -71,7 +90,7 @@ export default function ApplicationPage() {
         setExisting(app)
         // Pre-fill form if application needs revision so client can edit and resubmit
         if (app && app.status === REVISION_STATUS) {
-          setForm((prev) => ({ ...prev, ...app }))
+          setForm(toApplicationInput(app))
           if (app.disability_types && Array.isArray(app.disability_types)) {
             setShowOtherDisability(app.disability_types.includes('Other Disability'))
           }
