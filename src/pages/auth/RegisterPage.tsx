@@ -45,14 +45,19 @@ export default function RegisterPage() {
           <div className="card shadow fade-in-up">
             <div className="card-body p-4 p-md-5">
               <div className="text-center mb-4">
-                <div
-                  className="d-inline-grid mx-auto mb-3"
+                {/* Logo image */}
+                <img
+                  src="https://cdn.postimage.me/2026/09/04/ce3cc890-fba2-4622-b7f4-8d05cfa7a8d5.jpeg"
+                  alt="PDAOLink Logo"
+                  className="d-block mx-auto mb-3"
                   style={{
-                    width: 56, height: 56,
-                    background: 'linear-gradient(135deg,var(--pdao-primary),var(--pdao-primary-dark))',
-                    borderRadius: 14, color: '#fff', fontSize: '1.5rem', fontWeight: 800, placeItems: 'center',
+                    width: 56,
+                    height: 56,
+                    objectFit: 'cover',
+                    borderRadius: 14,
+                    boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
                   }}
-                >P</div>
+                />
                 <h3 className="mb-1">Create your account</h3>
                 <p className="text-muted mb-0">Register to apply for your PWD ID online</p>
               </div>
