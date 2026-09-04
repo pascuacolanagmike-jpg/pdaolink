@@ -17,6 +17,10 @@ export default function RegisterPage() {
   const [showEnroll, setShowEnroll] = useState(false)
   const [showZeroTrust, setShowZeroTrust] = useState(false)
 
+  // New state for password visibility
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setError(null)
@@ -82,11 +86,48 @@ export default function RegisterPage() {
                 <div className="row g-3">
                   <div className="col-md-6">
                     <label className="form-label">Password</label>
-                    <input type="password" className="form-control" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} placeholder="Min 8 characters" />
+                    <div className="position-relative">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        className="form-control pe-5"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                        minLength={8}
+                        placeholder="Min 8 characters"
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-link position-absolute top-50 end-0 translate-middle-y p-0 me-2"
+                        onClick={() => setShowPassword(!showPassword)}
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        tabIndex={-1}
+                      >
+                        <i className={`bi ${showPassword ? 'bi-eye-slash' : 'bi-eye'}`} />
+                      </button>
+                    </div>
                   </div>
                   <div className="col-md-6">
                     <label className="form-label">Confirm password</label>
-                    <input type="password" className="form-control" value={confirm} onChange={(e) => setConfirm(e.target.value)} required minLength={8} />
+                    <div className="position-relative">
+                      <input
+                        type={showConfirmPassword ? 'text' : 'password'}
+                        className="form-control pe-5"
+                        value={confirm}
+                        onChange={(e) => setConfirm(e.target.value)}
+                        required
+                        minLength={8}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-link position-absolute top-50 end-0 translate-middle-y p-0 me-2"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                        tabIndex={-1}
+                      >
+                        <i className={`bi ${showConfirmPassword ? 'bi-eye-slash' : 'bi-eye'}`} />
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <div className="form-text mb-3">
@@ -144,6 +185,14 @@ export default function RegisterPage() {
           color: #0056b3; font-size: 0.85rem; font-weight: 500;
         }
         .sensor-badge i { font-size: 1.3rem; flex-shrink: 0; }
+        /* Optional: make the eye icon less intrusive */
+        .btn-link {
+          color: #6c757d;
+          text-decoration: none;
+        }
+        .btn-link:hover {
+          color: #495057;
+        }
       `}</style>
     </div>
   )
