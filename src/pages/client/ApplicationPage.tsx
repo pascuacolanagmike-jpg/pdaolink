@@ -37,7 +37,9 @@ const EMPTY: ApplicationInput = {
   physician_name: '', physician_license_no: '',
 }
 
+// 'Needs Revision' is intentionally excluded so clients can re-edit and resubmit
 const ACTIVE_STATUSES = ['Pending', 'Under Review', 'Approved', 'Ready for Pickup']
+const REVISION_STATUS = 'Needs Revision'
 
 export default function ApplicationPage() {
   const { profile } = useAuth()
@@ -65,7 +67,15 @@ export default function ApplicationPage() {
       .limit(1)
       .maybeSingle()
       .then(({ data }) => {
-        setExisting(data as Application | null)
+        const app = data as Application | null
+        setExisting(app)
+        // Pre-fill form if application needs revision so client can edit and resubmit
+        if (app && app.status === REVISION_STATUS) {
+          setForm((prev) => ({ ...prev, ...app }))
+          if (app.disability_types && Array.isArray(app.disability_types)) {
+            setShowOtherDisability(app.disability_types.includes('Other Disability'))
+          }
+        }
         setLoading(false)
       })
   }, [profile])
@@ -102,22 +112,41 @@ export default function ApplicationPage() {
       return
     }
     setSubmitting(true)
-    const { data, error } = await supabase.from('applications').insert(form).select().single()
-    setSubmitting(false)
-    if (error) {
-      setError(error.message)
-      return
+    const isRevision = existing?.status === REVISION_STATUS
+
+    let appId: string
+    if (isRevision && existing) {
+      // UPDATE the existing application and reset status to Pending
+      const { error } = await supabase
+        .from('applications')
+        .update({ ...form, status: 'Pending', remarks: '', last_updated: new Date().toISOString() })
+        .eq('id', existing.id)
+      setSubmitting(false)
+      if (error) { setError(error.message); return }
+      appId = existing.id
+    } else {
+      // INSERT new application
+      const { data, error } = await supabase.from('applications').insert(form).select().single()
+      setSubmitting(false)
+      if (error) { setError(error.message); return }
+      appId = data.id
     }
+
     await supabase.from('status_logs').insert({
-      application_id: data.id, old_status: null, new_status: 'Pending',
-      remarks: 'Application submitted', changed_by: profile?.fullname ?? 'Applicant',
+      application_id: appId,
+      old_status: isRevision ? REVISION_STATUS : null,
+      new_status: 'Pending',
+      remarks: isRevision ? 'Resubmitted after revision' : 'Application submitted',
+      changed_by: profile?.fullname ?? 'Applicant',
     })
     await supabase.from('notifications').insert({
       user_id: profile!.id,
-      message: 'Your application has been submitted and is now pending review.',
+      message: isRevision
+        ? 'Your revised application has been resubmitted and is pending review.'
+        : 'Your application has been submitted and is now pending review.',
       link: '/status',
     })
-    setSuccess('Application submitted successfully!')
+    setSuccess(isRevision ? 'Application resubmitted successfully!' : 'Application submitted successfully!')
     setTimeout(() => navigate('/status'), 1200)
   }
 
@@ -155,6 +184,21 @@ export default function ApplicationPage() {
             </div>
           </div>
         ) : (
+          <>
+          {existing?.status === REVISION_STATUS && (
+            <div className="alert alert-warning d-flex gap-3 align-items-start mb-3">
+              <i className="bi bi-exclamation-triangle-fill fs-5 mt-1 flex-shrink-0" />
+              <div>
+                <strong>Your application needs revision.</strong>
+                <p className="mb-0 mt-1">
+                  Please update the information below and resubmit.
+                  {existing.remarks && (
+                    <span className="d-block mt-1"><strong>Admin remarks:</strong> {existing.remarks}</span>
+                  )}
+                </p>
+              </div>
+            </div>
+          )}
           <form onSubmit={handleSubmit} noValidate>
             {/* Section 1-3 */}
             <FormCard icon="bi-clipboard-check" title="Application Details">
@@ -477,10 +521,16 @@ export default function ApplicationPage() {
             <div className="d-flex justify-content-end gap-2 mt-2">
               <button type="button" className="btn btn-soft" onClick={() => navigate('/dashboard')}>Cancel</button>
               <button type="submit" className="btn btn-primary" disabled={submitting}>
-                {submitting ? <><span className="spinner-border spinner-border-sm me-1" /> Submitting…</> : <><i className="bi bi-send me-1" /> Submit application</>}
+                {submitting
+                  ? <><span className="spinner-border spinner-border-sm me-1" /> Submitting…</>
+                  : existing?.status === REVISION_STATUS
+                    ? <><i className="bi bi-arrow-repeat me-1" /> Resubmit application</>
+                    : <><i className="bi bi-send me-1" /> Submit application</>
+                }
               </button>
             </div>
           </form>
+          </>
         )}
       </div>
 
