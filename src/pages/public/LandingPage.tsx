@@ -6,22 +6,23 @@ import { fmtDate } from '../../lib/types'
 import { AutoSecurityPopup } from '../../components/SecurityPopup'
 
 /* ============================================================
-   DEVELOPER ACCESS GATE — Paywall + Name Restriction
+   DEVELOPER ACCESS GATE — Hidden Name + Slider Acknowledgment
    ============================================================ */
 
-const AUTHORIZED_DEVELOPERS = ['Mike Pascua', 'Marie Joy De Guzman']
+const AUTHORIZED_DEVELOPERS = ['Mike Pascua', 'Marie Joy De Guzman'] // kept hidden
 const EXIT_COUNTDOWN_SECONDS = 10
-const DEV_COST = '₱25,000.00'          // ← update with your actual dev fee
-const SERVER_COST = '₱1,500.00/month'   // ← update with your actual server fee
+const DEV_COST = '₱25,000.00'
+const SERVER_COST = '₱1,500.00/month'
 const ACCESS_KEY = 'pdaolink_dev_granted'
 
-type GateStep = 'name' | 'paywall' | 'denied' | 'granted'
+type GateStep = 'acknowledge' | 'name' | 'denied' | 'granted'
 
 function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
   const [step, setStep] = useState<GateStep>(() => {
     const saved = sessionStorage.getItem(ACCESS_KEY)
-    return saved === 'true' ? 'granted' : 'name'
+    return saved === 'true' ? 'granted' : 'acknowledge'
   })
+  const [acknowledged, setAcknowledged] = useState(false)
   const [nameInput, setNameInput] = useState('')
   const [countdown, setCountdown] = useState(EXIT_COUNTDOWN_SECONDS)
   const [error, setError] = useState('')
@@ -30,7 +31,6 @@ function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (step !== 'denied') return
     if (countdown <= 0) {
-      // Hard exit: clear session, show goodbye, try to close tab
       sessionStorage.clear()
       document.body.innerHTML = `
         <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;
@@ -44,9 +44,7 @@ function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
             </p>
           </div>
         </div>`
-      // Attempt to close the tab (browsers may block this)
       window.close()
-      // Fallback: redirect to a blank page after a brief moment
       setTimeout(() => {
         window.location.href = 'about:blank'
       }, 1500)
@@ -57,7 +55,15 @@ function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
     return () => clearTimeout(timer)
   }, [step, countdown])
 
-  /* ---------- name validation ---------- */
+  /* ---------- go to name entry after slider acknowledgment ---------- */
+  const handleAcknowledge = useCallback(() => {
+    if (acknowledged) {
+      setStep('name')
+      setError('')
+    }
+  }, [acknowledged])
+
+  /* ---------- validate hidden name ---------- */
   const handleNameSubmit = useCallback(() => {
     const trimmed = nameInput.trim().toLowerCase()
     const isAuthorized = AUTHORIZED_DEVELOPERS.some(
@@ -65,27 +71,22 @@ function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
     )
 
     if (isAuthorized) {
-      setStep('paywall')
-      setError('')
+      sessionStorage.setItem(ACCESS_KEY, 'true')
+      setStep('granted')
     } else {
       setStep('denied')
       setCountdown(EXIT_COUNTDOWN_SECONDS)
     }
   }, [nameInput])
 
-  /* ---------- paywall acknowledgement ---------- */
-  const handlePaywallAccept = useCallback(() => {
-    sessionStorage.setItem(ACCESS_KEY, 'true')
-    setStep('granted')
-  }, [])
-
-  /* ---------- reset / change developer ---------- */
+  /* ---------- reset gate ---------- */
   const handleReset = useCallback(() => {
     sessionStorage.removeItem(ACCESS_KEY)
     setNameInput('')
+    setAcknowledged(false)
     setError('')
     setCountdown(EXIT_COUNTDOWN_SECONDS)
-    setStep('name')
+    setStep('acknowledge')
   }, [])
 
   /* ============================================================
@@ -110,72 +111,8 @@ function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
           padding: '1rem',
         }}
       >
-        {/* ============ STEP 1: NAME ENTRY ============ */}
-        {step === 'name' && (
-          <div
-            className="card border-0 shadow-lg"
-            style={{ maxWidth: 460, width: '100%', borderRadius: 16 }}
-          >
-            <div className="card-body p-4 p-md-5">
-              <div className="text-center mb-4">
-                <div
-                  style={{
-                    width: 64,
-                    height: 64,
-                    borderRadius: 16,
-                    background: 'rgba(13,110,253,0.1)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    margin: '0 auto 1rem',
-                  }}
-                >
-                  <i className="bi bi-lock-fill text-primary" style={{ fontSize: '1.75rem' }} />
-                </div>
-                <h4 className="fw-bold mb-1">Developer Access Only</h4>
-                <p className="text-muted small mb-0">
-                  This portal is restricted to authorized developers.
-                </p>
-              </div>
-
-              <div className="mb-3">
-                <label htmlFor="devName" className="form-label fw-semibold">
-                  Enter your full name
-                </label>
-                <input
-                  id="devName"
-                  type="text"
-                  className="form-control form-control-lg"
-                  placeholder="e.g. Juan Dela Cruz"
-                  value={nameInput}
-                  onChange={(e) => {
-                    setNameInput(e.target.value)
-                    setError('')
-                  }}
-                  onKeyDown={(e) => e.key === 'Enter' && handleNameSubmit()}
-                  autoFocus
-                />
-                {error && <div className="text-danger small mt-1">{error}</div>}
-              </div>
-
-              <button
-                className="btn btn-primary w-100 btn-lg"
-                onClick={handleNameSubmit}
-                disabled={nameInput.trim().length < 3}
-              >
-                <i className="bi bi-shield-lock me-1" /> Verify Access
-              </button>
-
-              <p className="text-muted small text-center mt-3 mb-0">
-                Only <strong>Mike Pascua</strong> and{' '}
-                <strong>Marie Joy De Guzman</strong> are authorized.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* ============ STEP 2a: PAYWALL (authorized devs) ============ */}
-        {step === 'paywall' && (
+        {/* ============ STEP 1: PAYWALL ACKNOWLEDGMENT ============ */}
+        {step === 'acknowledge' && (
           <div
             className="card border-0 shadow-lg"
             style={{ maxWidth: 540, width: '100%', borderRadius: 16 }}
@@ -196,9 +133,9 @@ function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
                 >
                   <i className="bi bi-credit-card text-warning" style={{ fontSize: '1.75rem' }} />
                 </div>
-                <h4 className="fw-bold mb-1">Payment Required</h4>
+                <h4 className="fw-bold mb-1">Developer Access</h4>
                 <p className="text-muted small mb-0">
-                  Welcome, <strong>{nameInput.trim()}</strong>. Please review the payment terms.
+                  Please review the payment terms before proceeding.
                 </p>
               </div>
 
@@ -229,22 +166,108 @@ function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
                 </p>
               </div>
 
+              {/* Slider acknowledgment */}
+              <div className="form-check form-switch mb-4">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  role="switch"
+                  id="acknowledgeSwitch"
+                  checked={acknowledged}
+                  onChange={(e) => setAcknowledged(e.target.checked)}
+                  style={{ cursor: 'pointer', width: '3em', height: '1.5em' }}
+                />
+                <label
+                  className="form-check-label ms-2 fw-semibold"
+                  htmlFor="acknowledgeSwitch"
+                  style={{ cursor: 'pointer' }}
+                >
+                  I understand the payment terms
+                </label>
+              </div>
+
+              <button
+                className="btn btn-primary w-100 btn-lg"
+                onClick={handleAcknowledge}
+                disabled={!acknowledged}
+              >
+                <i className="bi bi-check-circle me-1" /> Continue
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ============ STEP 2: HIDDEN NAME ENTRY ============ */}
+        {step === 'name' && (
+          <div
+            className="card border-0 shadow-lg"
+            style={{ maxWidth: 460, width: '100%', borderRadius: 16 }}
+          >
+            <div className="card-body p-4 p-md-5">
+              <div className="text-center mb-4">
+                <div
+                  style={{
+                    width: 64,
+                    height: 64,
+                    borderRadius: 16,
+                    background: 'rgba(13,110,253,0.1)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '0 auto 1rem',
+                  }}
+                >
+                  <i className="bi bi-shield-lock text-primary" style={{ fontSize: '1.75rem' }} />
+                </div>
+                <h4 className="fw-bold mb-1">Identity Verification</h4>
+                <p className="text-muted small mb-0">
+                  Enter your full name to verify access.
+                </p>
+              </div>
+
+              <div className="mb-3">
+                <label htmlFor="devName" className="form-label fw-semibold">
+                  Your full name
+                </label>
+                <input
+                  id="devName"
+                  type="text"
+                  className="form-control form-control-lg"
+                  placeholder="e.g. Juan Dela Cruz"
+                  value={nameInput}
+                  onChange={(e) => {
+                    setNameInput(e.target.value)
+                    setError('')
+                  }}
+                  onKeyDown={(e) => e.key === 'Enter' && handleNameSubmit()}
+                  autoFocus
+                />
+                {error && <div className="text-danger small mt-1">{error}</div>}
+              </div>
+
               <div className="d-grid gap-2">
-                <button className="btn btn-primary btn-lg" onClick={handlePaywallAccept}>
-                  <i className="bi bi-check-circle me-1" /> I Understand — Proceed
+                <button
+                  className="btn btn-primary btn-lg"
+                  onClick={handleNameSubmit}
+                  disabled={nameInput.trim().length < 3}
+                >
+                  <i className="bi bi-check-lg me-1" /> Verify
                 </button>
                 <button
                   className="btn btn-outline-secondary"
-                  onClick={handleReset}
+                  onClick={() => {
+                    setStep('acknowledge')
+                    setAcknowledged(false)
+                  }}
                 >
-                  <i className="bi bi-arrow-left me-1" /> Go Back
+                  <i className="bi bi-arrow-left me-1" /> Back
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* ============ STEP 2b: DENIED (unauthorized) ============ */}
+        {/* ============ STEP 3: ACCESS DENIED ============ */}
         {step === 'denied' && (
           <div
             className="card border-0 shadow-lg text-center"
@@ -267,11 +290,10 @@ function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
               </div>
               <h3 className="fw-bold text-danger mb-2">Access Denied</h3>
               <p className="text-muted mb-1">
-                <strong>"{nameInput.trim()}"</strong> is not authorized to access this system.
+                You are not authorized to access this system.
               </p>
               <p className="text-muted small mb-4">
-                Only <strong>Mike Pascua</strong> and{' '}
-                <strong>Marie Joy De Guzman</strong> may enter.
+                Please contact the system administrator if you believe this is a mistake.
               </p>
 
               <div className="display-4 fw-bold text-danger mb-3">{countdown}</div>
@@ -286,7 +308,7 @@ function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
                 className="btn btn-outline-secondary btn-sm mt-4"
                 onClick={handleReset}
               >
-                <i className="bi bi-arrow-left me-1" /> Try Another Name
+                <i className="bi bi-arrow-left me-1" /> Try Again
               </button>
             </div>
           </div>
