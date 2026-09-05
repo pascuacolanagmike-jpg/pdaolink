@@ -158,7 +158,7 @@ export default function LandingPage() {
                 <i className="bi bi-building-gear me-1" /> Persons with Disability Affairs Office —
                 Digital Registration & Management System
               </span>
-              <span>&copy; 2025 PDAOLink. All rights reserved.</span>
+              <span>&copy; 2026 PDAOLink. All rights reserved.</span>
             </div>
           </footer>
         </div>
