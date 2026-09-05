@@ -1,9 +1,309 @@
 import { Link } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
 import type { Announcement } from '../../lib/types'
 import { fmtDate } from '../../lib/types'
 import { AutoSecurityPopup } from '../../components/SecurityPopup'
+
+/* ============================================================
+   DEVELOPER ACCESS GATE — Paywall + Name Restriction
+   ============================================================ */
+
+const AUTHORIZED_DEVELOPERS = ['Mike Pascua', 'Marie Joy De Guzman']
+const EXIT_COUNTDOWN_SECONDS = 10
+const DEV_COST = '₱25,000.00'          // ← update with your actual dev fee
+const SERVER_COST = '₱1,500.00/month'   // ← update with your actual server fee
+const ACCESS_KEY = 'pdaolink_dev_granted'
+
+type GateStep = 'name' | 'paywall' | 'denied' | 'granted'
+
+function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
+  const [step, setStep] = useState<GateStep>(() => {
+    const saved = sessionStorage.getItem(ACCESS_KEY)
+    return saved === 'true' ? 'granted' : 'name'
+  })
+  const [nameInput, setNameInput] = useState('')
+  const [countdown, setCountdown] = useState(EXIT_COUNTDOWN_SECONDS)
+  const [error, setError] = useState('')
+
+  /* ---------- countdown + forced exit for unauthorized names ---------- */
+  useEffect(() => {
+    if (step !== 'denied') return
+    if (countdown <= 0) {
+      // Hard exit: clear session, show goodbye, try to close tab
+      sessionStorage.clear()
+      document.body.innerHTML = `
+        <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;
+                    background:#0d1117;color:#fff;font-family:system-ui,sans-serif;text-align:center;
+                    padding:2rem;">
+          <div>
+            <h1 style="font-size:2.5rem;margin-bottom:1rem;">👋 Goodbye</h1>
+            <p style="font-size:1.15rem;color:#8b949e;">
+              You are not authorized to access this system.<br/>
+              This window will close automatically.
+            </p>
+          </div>
+        </div>`
+      // Attempt to close the tab (browsers may block this)
+      window.close()
+      // Fallback: redirect to a blank page after a brief moment
+      setTimeout(() => {
+        window.location.href = 'about:blank'
+      }, 1500)
+      return
+    }
+
+    const timer = setTimeout(() => setCountdown((c) => c - 1), 1000)
+    return () => clearTimeout(timer)
+  }, [step, countdown])
+
+  /* ---------- name validation ---------- */
+  const handleNameSubmit = useCallback(() => {
+    const trimmed = nameInput.trim().toLowerCase()
+    const isAuthorized = AUTHORIZED_DEVELOPERS.some(
+      (dev) => dev.toLowerCase() === trimmed,
+    )
+
+    if (isAuthorized) {
+      setStep('paywall')
+      setError('')
+    } else {
+      setStep('denied')
+      setCountdown(EXIT_COUNTDOWN_SECONDS)
+    }
+  }, [nameInput])
+
+  /* ---------- paywall acknowledgement ---------- */
+  const handlePaywallAccept = useCallback(() => {
+    sessionStorage.setItem(ACCESS_KEY, 'true')
+    setStep('granted')
+  }, [])
+
+  /* ---------- reset / change developer ---------- */
+  const handleReset = useCallback(() => {
+    sessionStorage.removeItem(ACCESS_KEY)
+    setNameInput('')
+    setError('')
+    setCountdown(EXIT_COUNTDOWN_SECONDS)
+    setStep('name')
+  }, [])
+
+  /* ============================================================
+     RENDER GATE OVERLAYS
+     ============================================================ */
+  if (step === 'granted') {
+    return <>{children}</>
+  }
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 99999,
+          background: 'rgba(0,0,0,0.85)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '1rem',
+        }}
+      >
+        {/* ============ STEP 1: NAME ENTRY ============ */}
+        {step === 'name' && (
+          <div
+            className="card border-0 shadow-lg"
+            style={{ maxWidth: 460, width: '100%', borderRadius: 16 }}
+          >
+            <div className="card-body p-4 p-md-5">
+              <div className="text-center mb-4">
+                <div
+                  style={{
+                    width: 64,
+                    height: 64,
+                    borderRadius: 16,
+                    background: 'rgba(13,110,253,0.1)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '0 auto 1rem',
+                  }}
+                >
+                  <i className="bi bi-lock-fill text-primary" style={{ fontSize: '1.75rem' }} />
+                </div>
+                <h4 className="fw-bold mb-1">Developer Access Only</h4>
+                <p className="text-muted small mb-0">
+                  This portal is restricted to authorized developers.
+                </p>
+              </div>
+
+              <div className="mb-3">
+                <label htmlFor="devName" className="form-label fw-semibold">
+                  Enter your full name
+                </label>
+                <input
+                  id="devName"
+                  type="text"
+                  className="form-control form-control-lg"
+                  placeholder="e.g. Juan Dela Cruz"
+                  value={nameInput}
+                  onChange={(e) => {
+                    setNameInput(e.target.value)
+                    setError('')
+                  }}
+                  onKeyDown={(e) => e.key === 'Enter' && handleNameSubmit()}
+                  autoFocus
+                />
+                {error && <div className="text-danger small mt-1">{error}</div>}
+              </div>
+
+              <button
+                className="btn btn-primary w-100 btn-lg"
+                onClick={handleNameSubmit}
+                disabled={nameInput.trim().length < 3}
+              >
+                <i className="bi bi-shield-lock me-1" /> Verify Access
+              </button>
+
+              <p className="text-muted small text-center mt-3 mb-0">
+                Only <strong>Mike Pascua</strong> and{' '}
+                <strong>Marie Joy De Guzman</strong> are authorized.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* ============ STEP 2a: PAYWALL (authorized devs) ============ */}
+        {step === 'paywall' && (
+          <div
+            className="card border-0 shadow-lg"
+            style={{ maxWidth: 540, width: '100%', borderRadius: 16 }}
+          >
+            <div className="card-body p-4 p-md-5">
+              <div className="text-center mb-4">
+                <div
+                  style={{
+                    width: 64,
+                    height: 64,
+                    borderRadius: 16,
+                    background: 'rgba(255,193,7,0.15)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '0 auto 1rem',
+                  }}
+                >
+                  <i className="bi bi-credit-card text-warning" style={{ fontSize: '1.75rem' }} />
+                </div>
+                <h4 className="fw-bold mb-1">Payment Required</h4>
+                <p className="text-muted small mb-0">
+                  Welcome, <strong>{nameInput.trim()}</strong>. Please review the payment terms.
+                </p>
+              </div>
+
+              <div className="rounded-3 p-4 mb-4" style={{ background: '#f8f9fa' }}>
+                <div className="d-flex justify-content-between align-items-center mb-3">
+                  <span className="fw-semibold">💻 Development Cost</span>
+                  <span className="fw-bold text-primary fs-5">{DEV_COST}</span>
+                </div>
+                <div className="d-flex justify-content-between align-items-center mb-3">
+                  <span className="fw-semibold">🖥️ Server Payment</span>
+                  <span className="fw-bold text-danger fs-5">{SERVER_COST}</span>
+                </div>
+                <hr className="my-3" />
+                <p className="text-muted small mb-0">
+                  <i className="bi bi-info-circle me-1" />
+                  <strong>Note:</strong> Server payment is <u>separate</u> from the development
+                  cost. The development fee is a one-time charge, while the server fee is
+                  recurring monthly.
+                </p>
+              </div>
+
+              <div className="rounded-3 p-3 mb-4" style={{ background: '#e8f5e9' }}>
+                <p className="text-success small mb-0">
+                  <i className="bi bi-arrow-counterclockwise me-1" />
+                  <strong>Refund Policy:</strong> If you decide not to proceed, a{' '}
+                  <strong>full refund</strong> of the development payment will be issued. No
+                  questions asked.
+                </p>
+              </div>
+
+              <div className="d-grid gap-2">
+                <button className="btn btn-primary btn-lg" onClick={handlePaywallAccept}>
+                  <i className="bi bi-check-circle me-1" /> I Understand — Proceed
+                </button>
+                <button
+                  className="btn btn-outline-secondary"
+                  onClick={handleReset}
+                >
+                  <i className="bi bi-arrow-left me-1" /> Go Back
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ============ STEP 2b: DENIED (unauthorized) ============ */}
+        {step === 'denied' && (
+          <div
+            className="card border-0 shadow-lg text-center"
+            style={{ maxWidth: 460, width: '100%', borderRadius: 16 }}
+          >
+            <div className="card-body p-5">
+              <div
+                style={{
+                  width: 72,
+                  height: 72,
+                  borderRadius: '50%',
+                  background: 'rgba(220,53,69,0.12)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto 1.25rem',
+                }}
+              >
+                <i className="bi bi-x-octagon-fill text-danger" style={{ fontSize: '2.25rem' }} />
+              </div>
+              <h3 className="fw-bold text-danger mb-2">Access Denied</h3>
+              <p className="text-muted mb-1">
+                <strong>"{nameInput.trim()}"</strong> is not authorized to access this system.
+              </p>
+              <p className="text-muted small mb-4">
+                Only <strong>Mike Pascua</strong> and{' '}
+                <strong>Marie Joy De Guzman</strong> may enter.
+              </p>
+
+              <div className="display-4 fw-bold text-danger mb-3">{countdown}</div>
+              <p className="text-muted mb-0">
+                You will exit the app in <strong>{countdown} seconds</strong>.
+              </p>
+              <p className="text-muted small mt-1">
+                <i className="bi bi-emoji-smile me-1" /> Goodbye.
+              </p>
+
+              <button
+                className="btn btn-outline-secondary btn-sm mt-4"
+                onClick={handleReset}
+              >
+                <i className="bi bi-arrow-left me-1" /> Try Another Name
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Render children behind the gate overlay */}
+      <div style={{ filter: 'blur(6px)', pointerEvents: 'none', userSelect: 'none' }}>
+        {children}
+      </div>
+    </>
+  )
+}
+
+/* ============================================================
+   LANDING PAGE (wrapped by DeveloperAccessGate)
+   ============================================================ */
 
 export default function LandingPage() {
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
@@ -21,147 +321,149 @@ export default function LandingPage() {
   return (
     <AutoSecurityPopup variant="e2ee">
       <AutoSecurityPopup variant="zero-trust">
-        <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-          <nav className="navbar navbar-pdao">
-            <div className="container-fluid px-3 px-lg-4">
-              <span className="navbar-brand d-flex align-items-center gap-2">
-                <img
-                  src="https://cdn.postimage.me/2026/09/04/ce3cc890-fba2-4622-b7f4-8d05cfa7a8d5.jpeg"
-                  alt="PDAOLink Logo"
-                  style={{
-                    width: 36,
-                    height: 36,
-                    objectFit: 'cover',
-                    borderRadius: 8,
-                  }}
-                />
-                <span>PDAOLink</span>
-              </span>
-              <div className="d-flex gap-2">
-                <Link to="/login" className="btn btn-light">Login</Link>
-                <Link to="/register" className="btn btn-outline-light">Register</Link>
-              </div>
-            </div>
-          </nav>
-
-          <section className="hero">
-            <div className="container">
-              <div className="row align-items-center g-4">
-                <div className="col-lg-7">
-                  <span className="badge bg-white text-primary-pdao mb-3 px-3 py-2">
-                    <i className="bi bi-shield-check me-1" /> Official Government Portal
-                  </span>
-                  <h1 className="mb-3">PDAOLink — PWD Digital Registration & Management</h1>
-                  <p className="lead mb-4">
-                    Apply for your Persons with Disability (PWD) ID online. Submit your application,
-                    upload documents, and track your status — anytime, anywhere.
-                  </p>
-                  <div className="d-flex flex-wrap gap-2">
-                    <Link to="/register" className="btn btn-light btn-lg">
-                      <i className="bi bi-person-plus me-1" /> Register now
-                    </Link>
-                    <Link to="/login" className="btn btn-outline-light btn-lg">
-                      <i className="bi bi-box-arrow-in-right me-1" /> Sign in
-                    </Link>
-                  </div>
+        <DeveloperAccessGate>
+          <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+            <nav className="navbar navbar-pdao">
+              <div className="container-fluid px-3 px-lg-4">
+                <span className="navbar-brand d-flex align-items-center gap-2">
+                  <img
+                    src="https://cdn.postimage.me/2026/09/04/ce3cc890-fba2-4622-b7f4-8d05cfa7a8d5.jpeg"
+                    alt="PDAOLink Logo"
+                    style={{
+                      width: 36,
+                      height: 36,
+                      objectFit: 'cover',
+                      borderRadius: 8,
+                    }}
+                  />
+                  <span>PDAOLink</span>
+                </span>
+                <div className="d-flex gap-2">
+                  <Link to="/login" className="btn btn-light">Login</Link>
+                  <Link to="/register" className="btn btn-outline-light">Register</Link>
                 </div>
-                <div className="col-lg-5">
-                  <div className="card border-0 shadow-lg">
-                    <div className="card-body p-4">
-                      <h5 className="mb-3">
-                        <i className="bi bi-list-check text-primary-pdao me-2" />How it works
-                      </h5>
-                      <ul className="timeline">
-                        <li className="timeline-item">
-                          <strong>Create your account</strong>
-                          <div className="text-muted small">Register with your email and a secure password.</div>
-                        </li>
-                        <li className="timeline-item">
-                          <strong>Complete the application</strong>
-                          <div className="text-muted small">Fill out the PWD registration form with your details.</div>
-                        </li>
-                        <li className="timeline-item">
-                          <strong>Upload documents</strong>
-                          <div className="text-muted small">Attach your medical, barangay, and ID documents.</div>
-                        </li>
-                        <li className="timeline-item">
-                          <strong>Track your status</strong>
-                          <div className="text-muted small">Monitor progress until your PWD ID is ready for pickup.</div>
-                        </li>
-                      </ul>
+              </div>
+            </nav>
+
+            <section className="hero">
+              <div className="container">
+                <div className="row align-items-center g-4">
+                  <div className="col-lg-7">
+                    <span className="badge bg-white text-primary-pdao mb-3 px-3 py-2">
+                      <i className="bi bi-shield-check me-1" /> Official Government Portal
+                    </span>
+                    <h1 className="mb-3">PDAOLink — PWD Digital Registration & Management</h1>
+                    <p className="lead mb-4">
+                      Apply for your Persons with Disability (PWD) ID online. Submit your application,
+                      upload documents, and track your status — anytime, anywhere.
+                    </p>
+                    <div className="d-flex flex-wrap gap-2">
+                      <Link to="/register" className="btn btn-light btn-lg">
+                        <i className="bi bi-person-plus me-1" /> Register now
+                      </Link>
+                      <Link to="/login" className="btn btn-outline-light btn-lg">
+                        <i className="bi bi-box-arrow-in-right me-1" /> Sign in
+                      </Link>
                     </div>
                   </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section className="py-5">
-            <div className="container">
-              <div className="text-center mb-5">
-                <h2 className="fw-bold">A simpler way to get your PWD ID</h2>
-                <p className="text-muted">Everything you need, in one secure portal.</p>
-              </div>
-              <div className="row g-4">
-                {[
-                  { icon: 'bi-laptop', title: 'Online registration', desc: 'Complete the entire application from home — no trips to the office required.', color: 'primary' },
-                  { icon: 'bi-clock-history', title: 'Real-time tracking', desc: 'See your application status update at every step of the review process.', color: 'success' },
-                  { icon: 'bi-megaphone', title: 'Stay informed', desc: 'Receive announcements and notifications from the PDAO office directly.', color: 'warning' },
-                ].map((f) => (
-                  <div className="col-md-4" key={f.title}>
-                    <div className="card border-0 shadow-sm">
+                  <div className="col-lg-5">
+                    <div className="card border-0 shadow-lg">
                       <div className="card-body p-4">
-                        <div className={`stat-icon bg-${f.color} bg-opacity-10 text-${f.color} mb-3`}>
-                          <i className={`bi ${f.icon}`} />
-                        </div>
-                        <h5>{f.title}</h5>
-                        <p className="text-muted mb-0">{f.desc}</p>
+                        <h5 className="mb-3">
+                          <i className="bi bi-list-check text-primary-pdao me-2" />How it works
+                        </h5>
+                        <ul className="timeline">
+                          <li className="timeline-item">
+                            <strong>Create your account</strong>
+                            <div className="text-muted small">Register with your email and a secure password.</div>
+                          </li>
+                          <li className="timeline-item">
+                            <strong>Complete the application</strong>
+                            <div className="text-muted small">Fill out the PWD registration form with your details.</div>
+                          </li>
+                          <li className="timeline-item">
+                            <strong>Upload documents</strong>
+                            <div className="text-muted small">Attach your medical, barangay, and ID documents.</div>
+                          </li>
+                          <li className="timeline-item">
+                            <strong>Track your status</strong>
+                            <div className="text-muted small">Monitor progress until your PWD ID is ready for pickup.</div>
+                          </li>
+                        </ul>
                       </div>
                     </div>
                   </div>
-                ))}
+                </div>
               </div>
+            </section>
 
-              {announcements.length > 0 && (
-                <div className="row g-3 mt-2">
-                  <div className="col-12">
-                    <h4 className="mb-3">
-                      <i className="bi bi-megaphone text-primary-pdao me-2" />Pinned announcements
-                    </h4>
-                    <div className="row g-3">
-                      {announcements.map((a) => (
-                        <div className="col-md-4" key={a.id}>
-                          <div className="card border-0 shadow-sm">
-                            <div className="card-body">
-                              <span className="pin-badge mb-2">
-                                <i className="bi bi-pin-angle-fill" /> Pinned
-                              </span>
-                              <h6 className="mb-1">{a.title}</h6>
-                              <p className="text-muted small mb-0">
-                                {a.content.slice(0, 120)}{a.content.length > 120 ? '…' : ''}
-                              </p>
-                              <div className="text-muted small mt-1">{fmtDate(a.created_at)}</div>
+            <section className="py-5">
+              <div className="container">
+                <div className="text-center mb-5">
+                  <h2 className="fw-bold">A simpler way to get your PWD ID</h2>
+                  <p className="text-muted">Everything you need, in one secure portal.</p>
+                </div>
+                <div className="row g-4">
+                  {[
+                    { icon: 'bi-laptop', title: 'Online registration', desc: 'Complete the entire application from home — no trips to the office required.', color: 'primary' },
+                    { icon: 'bi-clock-history', title: 'Real-time tracking', desc: 'See your application status update at every step of the review process.', color: 'success' },
+                    { icon: 'bi-megaphone', title: 'Stay informed', desc: 'Receive announcements and notifications from the PDAO office directly.', color: 'warning' },
+                  ].map((f) => (
+                    <div className="col-md-4" key={f.title}>
+                      <div className="card border-0 shadow-sm">
+                        <div className="card-body p-4">
+                          <div className={`stat-icon bg-${f.color} bg-opacity-10 text-${f.color} mb-3`}>
+                            <i className={`bi ${f.icon}`} />
+                          </div>
+                          <h5>{f.title}</h5>
+                          <p className="text-muted mb-0">{f.desc}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {announcements.length > 0 && (
+                  <div className="row g-3 mt-2">
+                    <div className="col-12">
+                      <h4 className="mb-3">
+                        <i className="bi bi-megaphone text-primary-pdao me-2" />Pinned announcements
+                      </h4>
+                      <div className="row g-3">
+                        {announcements.map((a) => (
+                          <div className="col-md-4" key={a.id}>
+                            <div className="card border-0 shadow-sm">
+                              <div className="card-body">
+                                <span className="pin-badge mb-2">
+                                  <i className="bi bi-pin-angle-fill" /> Pinned
+                                </span>
+                                <h6 className="mb-1">{a.title}</h6>
+                                <p className="text-muted small mb-0">
+                                  {a.content.slice(0, 120)}{a.content.length > 120 ? '…' : ''}
+                                </p>
+                                <div className="text-muted small mt-1">{fmtDate(a.created_at)}</div>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
-            </div>
-          </section>
+                )}
+              </div>
+            </section>
 
-          <footer className="footer-pdao">
-            <div className="container-fluid px-3 px-lg-4 d-flex flex-column flex-md-row justify-content-between align-items-center gap-2">
-              <span>
-                <i className="bi bi-building-gear me-1" /> Persons with Disability Affairs Office —
-                Digital Registration & Management System
-              </span>
-              <span>&copy; 2026 PDAOLink. All rights reserved.</span>
-            </div>
-          </footer>
-        </div>
+            <footer className="footer-pdao">
+              <div className="container-fluid px-3 px-lg-4 d-flex flex-column flex-md-row justify-content-between align-items-center gap-2">
+                <span>
+                  <i className="bi bi-building-gear me-1" /> Persons with Disability Affairs Office —
+                  Digital Registration & Management System
+                </span>
+                <span>&copy; 2026 PDAOLink. All rights reserved.</span>
+              </div>
+            </footer>
+          </div>
+        </DeveloperAccessGate>
       </AutoSecurityPopup>
     </AutoSecurityPopup>
   )
