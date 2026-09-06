@@ -1,276 +1,357 @@
-import { type Application, appFullName, fmtDate } from '../lib/types'
+/* ═══════════════════════════════════════════
+   E-ID 3D Flip Card
+   ═══════════════════════════════════════════ */
 
-interface EidCardProps {
-  application: Application
-  photoUrl: string | null
-  flipped: boolean
-  onFlip?: () => void
+/* ── Scene wrapper ── */
+.eid-scene {
+  perspective: 1400px;
+  width: 100%;
+  max-width: 420px;
+  margin: 0 auto;
 }
 
-export default function EidCard({ application, photoUrl, flipped, onFlip }: EidCardProps) {
-  const fullName = appFullName(application) || '—'
-  const address = [
-    application.address,
-    application.barangay,
-    application.municipality,
-    application.province,
-  ]
-    .filter(Boolean)
-    .join(', ')
-  const disability =
-    application.disability_type ??
-    (application.disability_types ?? []).join(', ') ??
-    '—'
-  const pwdNumber =
-    application.pwd_number || `PDAO-${application.id.slice(0, 8).toUpperCase()}`
-  const birthDate = fmtDate(application.birth_date)
-  const gender = application.gender
+/* ── 3D card container ── */
+.eid-card-3d {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1.586 / 1;
+  transform-style: preserve-3d;
+  transition: transform 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
 
-  return (
-    <>
-      <style>{`
-        .eid-scene {
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          perspective: 1000px;
-          padding: 20px;
-        }
+.eid-card-3d.flipped {
+  transform: rotateY(180deg);
+}
 
-        .eid-card-3d {
-          width: 500px;
-          height: 315px;
-          position: relative;
-          transform-style: preserve-3d;
-          transition: transform 0.6s ease;
-        }
-        .eid-card-3d.flipped {
-          transform: rotateY(180deg);
-        }
+/* ── Shared face styles ── */
+.eid-face {
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow:
+    0 12px 40px rgba(0, 86, 179, 0.20),
+    0 2px 8px rgba(0, 0, 0, 0.08);
+}
 
-        .eid-face {
-          position: absolute;
-          width: 100%;
-          height: 100%;
-          backface-visibility: hidden;
-          border-radius: 8px;
-          overflow: hidden;
-          box-shadow: 0 6px 20px rgba(0,0,0,0.25), 0 2px 6px rgba(0,0,0,0.12);
-          background: #fff;
-        }
-        .eid-back {
-          transform: rotateY(180deg);
-        }
+/* ── Front face ── */
+.eid-front {
+  background: linear-gradient(135deg, #0056b3 0%, #003d80 100%);
+  color: #fff;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+}
 
-        /* object-fit: fill keeps pixel-perfect alignment with background image lines */
-        .eid-bg-img {
-          position: absolute;
-          inset: 0;
-          width: 100%;
-          height: 100%;
-          object-fit: fill;
-          z-index: 0;
-          display: block;
-        }
+/* ── Back face ── */
+.eid-back {
+  background: linear-gradient(135deg, #003d80 0%, #002a5c 100%);
+  color: #fff;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  transform: rotateY(180deg);
+}
 
-        /* Shared field style — transform: translateY(-50%) centers text on each line */
-        .eid-field {
-          position: absolute;
-          font-family: Arial, sans-serif;
-          font-size: 12.5px;
-          font-weight: 700;
-          color: #111;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          transform: translateY(-50%);
-          line-height: 1;
-          /* White halo keeps text readable over any background area */
-          text-shadow:
-            0 0 4px #fff,
-            0 0 4px #fff,
-            0 0 6px rgba(255,255,255,0.8);
-          z-index: 2;
-        }
 
-        .eid-photo {
-          position: absolute;
-          border: 2px solid #333;
-          background-color: #e8e8e8;
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          overflow: hidden;
-          z-index: 2;
-          border-radius: 2px;
-        }
-        .eid-photo img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-        }
-        .eid-photo-empty {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 4px;
-          color: #aaa;
-          font-size: 9px;
-          font-family: Arial, sans-serif;
-          text-align: center;
-        }
+/* ═══════════════════════════════════════════
+   FRONT — Header
+   ═══════════════════════════════════════════ */
 
-        /* ── Responsive: scale down on small screens ── */
-        @media (max-width: 560px) {
-          .eid-card-3d {
-            width: 340px;
-            height: 214px;
-          }
-          .eid-field {
-            font-size: 9px;
-          }
-        }
-      `}</style>
+.eid-header-bar {
+  background: rgba(255, 255, 255, 0.10);
+  padding: 0.4rem 0.85rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
 
-      <div className="eid-scene">
-        <div
-          className={`eid-card-3d ${flipped ? 'flipped' : ''}`}
-          onClick={onFlip}
-          style={onFlip ? { cursor: 'pointer' } : { cursor: 'default' }}
-        >
-          {/* ══════════════ FRONT ══════════════ */}
-          <div className="eid-face">
-            <img
-              src="/images/pwd-front.png"
-              alt=""
-              className="eid-bg-img"
-            />
+.eid-gov-label {
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: rgba(255, 255, 255, 0.80);
+  text-transform: uppercase;
+}
 
-            {/* Name — sits on the "Name:" line */}
-            <div
-              className="eid-field"
-              style={{ top: '42%', left: '30%', width: '37%' }}
-            >
-              {fullName}
-            </div>
+.eid-office-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.95);
+  margin-top: 1px;
+}
 
-            {/* Type of Disability */}
-            <div
-              className="eid-field"
-              style={{ top: '59%', left: '30%', width: '37%' }}
-            >
-              {disability}
-            </div>
+.eid-id-badge {
+  background: #fff;
+  color: #0056b3;
+  font-size: 0.55rem;
+  font-weight: 800;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 
-            {/* Photo box — right side of card */}
-            <div
-              className="eid-photo"
-              style={{ top: '27%', left: '69.5%', width: '24.5%', height: '57%' }}
-            >
-              {photoUrl ? (
-                <img src={photoUrl} alt="Applicant photo" />
-              ) : (
-                <div className="eid-photo-empty">
-                  <svg
-                    width="28"
-                    height="28"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="#bbb"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <circle cx="12" cy="8" r="4" />
-                    <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
-                  </svg>
-                  <span>Photo</span>
-                </div>
-              )}
-            </div>
 
-            {/* PWD / ID number — bottom right area */}
-            <div
-              className="eid-field"
-              style={{ top: '82.5%', left: '73%', width: '24%', fontSize: '10px' }}
-            >
-              {pwdNumber}
-            </div>
-          </div>
+/* ═══════════════════════════════════════════
+   FRONT — Body
+   ═══════════════════════════════════════════ */
 
-          {/* ══════════════ BACK ══════════════ */}
-          <div className="eid-face eid-back">
-            <img
-              src="https://cdn.postimage.me/2026/09/06/pwd-back.jpeg"
-              alt=""
-              className="eid-bg-img"
-            />
+.eid-body {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.7rem 0.85rem;
+  flex: 1;
+  min-height: 0;
+}
 
-            {/* ── Left column ── */}
+/* Photo box */
+.eid-photo-box {
+  flex-shrink: 0;
+  width: 72px;
+  height: 88px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.10);
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  display: grid;
+  place-items: center;
+}
 
-            {/* Address */}
-            <div
-              className="eid-field"
-              style={{ top: '28%', left: '30%', width: '41%', fontSize: '11px' }}
-            >
-              {address}
-            </div>
+.eid-photo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 
-            {/* Date of Birth */}
-            <div
-              className="eid-field"
-              style={{ top: '35%', left: '30%', width: '30%' }}
-            >
-              {birthDate}
-            </div>
+.eid-photo-placeholder {
+  font-size: 2rem;
+  color: rgba(255, 255, 255, 0.50);
+}
 
-            {/* Date Issued (last_updated) */}
-            <div
-              className="eid-field"
-              style={{ top: '42%', left: '30%', width: '30%' }}
-            >
-              {fmtDate(application.last_updated)}
-            </div>
+/* Info column */
+.eid-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
 
-            {/* ── Right column ── */}
+.eid-name {
+  font-size: 0.95rem;
+  font-weight: 800;
+  line-height: 1.15;
+  margin-bottom: 0.2rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
-            {/* Sex */}
-            <div
-              className="eid-field"
-              style={{ top: '28%', left: '74%', width: '22%' }}
-            >
-              {gender ?? '—'}
-            </div>
+.eid-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.62rem;
+}
 
-            {/* Blood Type */}
-            <div
-              className="eid-field"
-              style={{ top: '35%', left: '74%', width: '22%' }}
-            >
-              {application.blood_type ?? '—'}
-            </div>
+.eid-label {
+  color: rgba(255, 255, 255, 0.60);
+  font-weight: 600;
+  white-space: nowrap;
+}
 
-            {/* ── Emergency contact ── */}
+.eid-value {
+  color: #fff;
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
-            {/* Name */}
-            <div
-              className="eid-field"
-              style={{ top: '65%', left: '30%', width: '42%' }}
-            >
-              {application.emergency_name || '—'}
-            </div>
+.eid-value-sm {
+  font-size: 0.55rem;
+}
 
-            {/* Contact number */}
-            <div
-              className="eid-field"
-              style={{ top: '72%', left: '30%', width: '42%' }}
-            >
-              {application.emergency_contact_number || '—'}
-            </div>
-          </div>
-        </div>
-      </div>
-    </>
-  )
+
+/* ═══════════════════════════════════════════
+   FRONT — Footer
+   ═══════════════════════════════════════════ */
+
+.eid-footer-bar {
+  background: rgba(0, 0, 0, 0.20);
+  padding: 0.3rem 0.85rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.55rem;
+  color: rgba(255, 255, 255, 0.70);
+  font-weight: 600;
+}
+
+
+/* ═══════════════════════════════════════════
+   BACK — Header
+   ═══════════════════════════════════════════ */
+
+.eid-header-bar-back {
+  text-align: center;
+}
+
+
+/* ═══════════════════════════════════════════
+   BACK — Body
+   ═══════════════════════════════════════════ */
+
+.eid-back-body {
+  flex: 1;
+  padding: 0.6rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-height: 0;
+}
+
+.eid-back-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.eid-back-label {
+  font-size: 0.58rem;
+  color: rgba(255, 255, 255, 0.60);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.eid-back-value {
+  font-size: 0.62rem;
+  color: #fff;
+  font-weight: 600;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60%;
+}
+
+
+/* ═══════════════════════════════════════════
+   BACK — QR / ID area
+   ═══════════════════════════════════════════ */
+
+.eid-qr-area {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding-top: 0.3rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.eid-qr-placeholder {
+  width: 48px;
+  height: 48px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.eid-qr-placeholder i {
+  font-size: 1.8rem;
+  color: #003d80;
+}
+
+.eid-qr-text {
+  font-size: 0.58rem;
+  color: rgba(255, 255, 255, 0.80);
+}
+
+.eid-qr-id {
+  font-weight: 800;
+  color: #fff;
+  font-size: 0.65rem;
+  margin-top: 1px;
+}
+
+
+/* ═══════════════════════════════════════════
+   BACK — Footer
+   ═══════════════════════════════════════════ */
+
+.eid-footer-bar-back {
+  justify-content: space-between;
+}
+
+
+/* ═══════════════════════════════════════════
+   Page wrapper
+   ═══════════════════════════════════════════ */
+
+.eid-page-wrapper {
+  padding-bottom: 1rem;
+}
+
+
+/* ═══════════════════════════════════════════
+   Print styles
+   ═══════════════════════════════════════════ */
+
+@media print {
+  /* Hide all non-card UI */
+  .no-print,
+  .navbar-pdao,
+  .sidebar,
+  .footer-pdao {
+    display: none !important;
+  }
+
+  .eid-scene {
+    max-width: 3.5in;
+    perspective: none;
+  }
+
+  .eid-card-3d {
+    cursor: default;
+    transform: none !important;
+    transition: none !important;
+    box-shadow: none !important;
+    border: 1px solid #ccc;
+    border-radius: 12px;
+    aspect-ratio: 1.586 / 1;
+  }
+
+  /* Show both faces stacked vertically when printing */
+  .eid-face {
+    position: relative;
+    transform: none !important;
+    backface-visibility: visible;
+    -webkit-backface-visibility: visible;
+    page-break-inside: avoid;
+    box-shadow: none;
+  }
+
+  .eid-back {
+    transform: none;
+    margin-top: 0.3in;
+  }
+
+  .eid-card-3d.flipped {
+    transform: none;
+  }
+
+  body {
+    background: #fff !important;
+  }
 }
