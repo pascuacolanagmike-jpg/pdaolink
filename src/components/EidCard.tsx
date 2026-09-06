@@ -44,18 +44,24 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
           border-radius: 8px;
           overflow: hidden;
           box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-          background-size: cover;
-          background-position: center;
-        }
-        .eid-front {
-          background-image: url('/pwd-front.png');
+          background-color: white; /* Fallback if image fails */
         }
         .eid-back {
-          background-image: url('/pwd-back.png');
           transform: rotateY(180deg);
         }
         
-        /* Text positioning over the image's black lines */
+        /* The Background Image Layer */
+        .eid-bg-img {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          z-index: 0;
+        }
+
+        /* Text positioning (z-index 1 to sit on top of the image) */
         .front-field, .back-field {
           position: absolute;
           font-family: Arial, sans-serif;
@@ -67,6 +73,7 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
           text-overflow: ellipsis;
           line-height: 1.2;
           padding: 0 5px;
+          z-index: 1;
         }
 
         /* Photo Box Overlay */
@@ -78,6 +85,7 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
           justify-content: center;
           align-items: center;
           overflow: hidden;
+          z-index: 1;
         }
         .photo-img {
           width: 100%;
@@ -102,6 +110,8 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
           
           {/* FRONT */}
           <div className="eid-face eid-front">
+            {/* BACKGROUND IMAGE - Change src if saved in a subfolder */}
+            <img src="/pwd-front.png" alt="Front Background" className="eid-bg-img" />
             
             {/* Name (Over line) */}
             <div className="front-field" style={{ top: '41%', left: '10%', width: '48%' }}>
@@ -134,6 +144,9 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
 
           {/* BACK */}
           <div className="eid-face eid-back">
+            {/* BACKGROUND IMAGE - Change src if saved in a subfolder */}
+            <img src="/pwd-back.png" alt="Back Background" className="eid-bg-img" />
+            
             {/* Left Column - Address, DOB, Date Issued */}
             <div className="back-field" style={{ top: '35%', left: '10%', width: '50%' }}>
               {address}
