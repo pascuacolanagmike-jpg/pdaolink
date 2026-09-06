@@ -22,6 +22,7 @@ import ApplicantDetailPage from './pages/admin/ApplicantDetailPage'
 import AdminAnnouncements from './pages/admin/AdminAnnouncements'
 import ReportsPage from './pages/admin/ReportsPage'
 import AdminEidPage from './pages/admin/AdminEidPage'
+import AdminChangePassword from './pages/admin/AdminChangePassword'
 
 function Loading() {
   return (
