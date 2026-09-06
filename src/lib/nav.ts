@@ -15,5 +15,5 @@ export const ADMIN_NAV = [
   { to: '/admin/e-id', icon: 'bi-card-text', label: 'E-ID' },
   { to: '/admin/announcements', icon: 'bi-megaphone', label: 'Announcements' },
   { to: '/admin/reports', icon: 'bi-bar-chart', label: 'Reports' },
-  { path: '/admin/change-password', label: 'Change Password', icon: 'bi-key' }
+  { to: '/admin/change-password', label: 'Change Password', icon: 'bi-key' }
 ]
