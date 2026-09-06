@@ -180,7 +180,7 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
             <div
               style={{
                 position: 'absolute',
-                top: '61.5%',
+                top: '36%',
                 left: '5%',
                 width: '52%',
                 height: '5%',
