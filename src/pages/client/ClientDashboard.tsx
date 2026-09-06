@@ -55,11 +55,7 @@ export default function ClientDashboard() {
             <h3 className="mb-1">Welcome, {firstName}!</h3>
             <p className="text-muted mb-0">Here's the latest on your PWD application.</p>
           </div>
-          {application ? (
-            <Link to="/status" className="btn btn-soft"><i className="bi bi-eye me-1" /> View status</Link>
-          ) : (
-            <Link to="/application" className="btn btn-primary"><i className="bi bi-file-earmark-plus me-1" /> Start application</Link>
-          )}
+          {/* Removed the conditional button here */}
         </div>
 
         <div className="row g-3 mb-4">
