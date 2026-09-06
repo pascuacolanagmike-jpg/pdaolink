@@ -43,6 +43,7 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
           border-radius: 8px;
           overflow: hidden;
           box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+          background: #fff;
         }
         .eid-back {
           transform: rotateY(180deg);
@@ -59,31 +60,38 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
           z-index: 0;
         }
 
-        /* Text positioning */
+        /* Professional Text Fields */
         .front-field, .back-field {
           position: absolute;
-          font-family: Arial, sans-serif;
-          font-size: 15px;
+          font-family: 'Arial', 'Helvetica', sans-serif;
+          font-size: 13px; /* Professional, clean size */
           font-weight: 600;
-          color: black;
+          color: #222;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-          line-height: 1.2;
-          padding: 0 5px;
+          
+          /* The Magic Alignment Trick */
+          transform: translateY(-50%);
+          line-height: 1;
+          
+          /* White subtle glow to make text readable over the background */
+          text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 2px #fff;
           z-index: 1;
+          padding-left: 5px; /* Small buffer after the labels */
         }
 
         /* Photo Box Overlay */
         .photo-overlay {
           position: absolute;
-          border: 1px solid black;
-          background-color: white;
+          border: 1px solid #333; /* Clean, sharp border */
+          background-color: #f8f8f8;
           display: flex;
           justify-content: center;
           align-items: center;
           overflow: hidden;
           z-index: 1;
+          box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
         }
         .photo-img {
           width: 100%;
@@ -97,7 +105,7 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
             height: 220px;
           }
           .front-field, .back-field {
-            font-size: 12px;
+            font-size: 10px;
           }
         }
       `}</style>
@@ -107,21 +115,25 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
           
           {/* FRONT */}
           <div className="eid-face eid-front">
-            {/* Your local front image (you can replace this with a direct link too) */}
+            {/* Local front image */}
             <img src="/images/pwd-front.png" alt="Front Background" className="eid-bg-img" />
             
-            <div className="front-field" style={{ top: '41%', left: '10%', width: '48%' }}>
+            {/* Name: Centered perfectly on the line */}
+            <div className="front-field" style={{ top: '42%', left: '15%', width: '45%' }}>
               {fullName}
             </div>
             
-            <div className="front-field" style={{ top: '59%', left: '10%', width: '48%' }}>
+            {/* Type of Disability */}
+            <div className="front-field" style={{ top: '60%', left: '15%', width: '45%' }}>
               {disability}
             </div>
 
-            <div className="front-field" style={{ top: '77%', left: '10%', width: '40%' }}>
+            {/* Signature (Empty) */}
+            <div className="front-field" style={{ top: '77%', left: '15%', width: '40%' }}>
             </div>
 
-            <div className="photo-overlay" style={{ top: '26%', left: '68%', width: '27%', height: '55%' }}>
+            {/* Photo Box (Aligned exactly with the box) */}
+            <div className="photo-overlay" style={{ top: '26%', left: '70%', width: '24%', height: '55%' }}>
               {photoUrl ? (
                 <img src={photoUrl} alt="Applicant" className="photo-img" />
               ) : (
@@ -129,37 +141,41 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
               )}
             </div>
 
-            <div className="front-field" style={{ top: '84%', left: '70%', width: '25%' }}>
+            {/* ID No (Bottom Right) */}
+            <div className="front-field" style={{ top: '84%', left: '72%', width: '25%' }}>
               {pwdNumber}
             </div>
           </div>
 
           {/* BACK */}
           <div className="eid-face eid-back">
-            {/* Your direct embedded link for the back */}
+            {/* Direct embedded link for the back */}
             <img src="https://cdn.postimage.me/2026/09/06/pwd-back.jpeg" alt="Back Background" className="eid-bg-img" />
             
-            <div className="back-field" style={{ top: '35%', left: '10%', width: '50%' }}>
+            {/* Left Column */}
+            <div className="back-field" style={{ top: '37%', left: '15%', width: '50%' }}>
               {address}
             </div>
-            <div className="back-field" style={{ top: '45%', left: '10%', width: '30%' }}>
+            <div className="back-field" style={{ top: '47%', left: '15%', width: '30%' }}>
               {birthDate}
             </div>
-            <div className="back-field" style={{ top: '55%', left: '10%', width: '30%' }}>
+            <div className="back-field" style={{ top: '57%', left: '15%', width: '30%' }}>
               {fmtDate(application.last_updated)}
             </div>
 
-            <div className="back-field" style={{ top: '35%', left: '70%', width: '20%' }}>
+            {/* Right Column */}
+            <div className="back-field" style={{ top: '37%', left: '72%', width: '20%' }}>
               {gender ?? '—'}
             </div>
-            <div className="back-field" style={{ top: '45%', left: '70%', width: '20%' }}>
+            <div className="back-field" style={{ top: '47%', left: '72%', width: '20%' }}>
               {application.blood_type ?? '—'}
             </div>
 
-            <div className="back-field" style={{ top: '75%', left: '10%', width: '40%' }}>
+            {/* Emergency Contact Section */}
+            <div className="back-field" style={{ top: '72%', left: '15%', width: '40%' }}>
               {application.emergency_name || '—'}
             </div>
-            <div className="back-field" style={{ top: '82%', left: '10%', width: '40%' }}>
+            <div className="back-field" style={{ top: '80%', left: '15%', width: '40%' }}>
               {application.emergency_contact_number || '—'}
             </div>
           </div>
