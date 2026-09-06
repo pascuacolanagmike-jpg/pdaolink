@@ -1,278 +1,112 @@
-import { type Application, appFullName, fmtDate } from '../lib/types'
+{/* ═══════════════ FRONT ═══════════════ */}
+<div className="eid-face">
+  <img
+    src="https://cdn.postimage.me/2026/09/06/pwd-front.jpeg"
+    alt=""
+    className="eid-bg"
+  />
 
-interface EidCardProps {
-    application: Application
-    photoUrl: string | null
-    flipped: boolean
-    onFlip?: () => void
-}
+  {/* Name – left: 5% */}
+  <div
+    style={{
+      position: 'absolute',
+      top: '41%',
+      left: '5%',          // ✅ matches your working value
+      width: '52%',
+      height: '5%',
+      display: 'flex',
+      alignItems: 'flex-end',
+      justifyContent: 'center',
+      zIndex: 2,
+      overflow: 'hidden',
+    }}
+  >
+    <div style={{
+      fontFamily: 'Arial,sans-serif',
+      fontSize: '13px',
+      fontWeight: '700',
+      color: '#111',
+      whiteSpace: 'nowrap',
+      textOverflow: 'ellipsis',
+      overflow: 'hidden',
+      textShadow: '0 0 4px #fff,0 0 4px #fff,0 0 7px rgba(255,255,255,0.9)',
+      lineHeight: 1,
+    }}>
+      {fullName}
+    </div>
+  </div>
 
-const styles = `
-  .eid-page-wrapper { padding-bottom: 1rem; }
+  {/* Disability – now also left: 5% to match the name */}
+  <div
+    style={{
+      position: 'absolute',
+      top: '62%',
+      left: '5%',          // 🔁 changed from 14% to 5%
+      width: '52%',
+      height: '5%',
+      display: 'flex',
+      alignItems: 'flex-end',
+      justifyContent: 'center',
+      zIndex: 2,
+      overflow: 'hidden',
+    }}
+  >
+    <div style={{
+      fontFamily: 'Arial,sans-serif',
+      fontSize: '13px',
+      fontWeight: '700',
+      color: '#111',
+      whiteSpace: 'nowrap',
+      textOverflow: 'ellipsis',
+      overflow: 'hidden',
+      textShadow: '0 0 4px #fff,0 0 4px #fff,0 0 7px rgba(255,255,255,0.9)',
+      lineHeight: 1,
+    }}>
+      {disability}
+    </div>
+  </div>
 
-  .eid-scene {
-    perspective: 1400px;
-    width: 100%;
-    max-width: 500px;
-    margin: 0 auto;
-  }
+  {/* Photo box – adjust these values with DevTools to match exactly */}
+  <div
+    className="eid-photo-wrap"
+    style={{
+      top: '26%',
+      left: '70%',
+      width: '25%',
+      height: '54%',
+    }}
+  >
+    {photoUrl ? (
+      <img src={photoUrl} alt="Applicant" />
+    ) : (
+      <div className="eid-photo-empty">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#bbb" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="8" r="4" />
+          <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
+        </svg>
+        <span>Photo</span>
+      </div>
+    )}
+  </div>
 
-  .eid-card-3d {
-    position: relative;
-    width: 100%;
-    aspect-ratio: 1.586 / 1;
-    transform-style: preserve-3d;
-    transition: transform 0.7s cubic-bezier(0.4, 0, 0.2, 1);
-    cursor: pointer;
-  }
-
-  .eid-card-3d.flipped { transform: rotateY(180deg); }
-
-  .eid-face {
-    position: absolute;
-    inset: 0;
-    border-radius: 8px;
-    backface-visibility: hidden;
-    -webkit-backface-visibility: hidden;
-    overflow: hidden;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.12);
-  }
-
-  .eid-back-face { transform: rotateY(180deg); }
-
-  .eid-bg {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: fill;
-    display: block;
-    z-index: 0;
-  }
-
-  /* Front text fields – now aligned to sit ON the underline */
-  .eid-field {
-    position: absolute;
-    z-index: 2;
-    font-family: Arial, sans-serif;
-    font-size: 13px;
-    font-weight: 700;
-    color: #111;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    /* bottom of text touches the underline */
-    transform: translateY(-100%);
-    line-height: 1;
-    text-shadow:
-      0 0 4px #fff,
-      0 0 4px #fff,
-      0 0 7px rgba(255,255,255,0.9);
-  }
-
-  /* Professional photo box */
-  .eid-photo-wrap {
-    position: absolute;
-    z-index: 2;
-    overflow: hidden;
-    background: #f7f7f7;
-    border: 2px solid #ccc;
-    border-radius: 4px;
-    box-shadow: inset 0 2px 4px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.08);
-  }
-  .eid-photo-wrap img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-  }
-  .eid-photo-empty {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    color: #bbb;
-    font-size: 10px;
-    font-family: Arial, sans-serif;
-    background: #f9f9f9;
-  }
-  .eid-photo-empty svg {
-    opacity: 0.5;
-  }
-
-  @media (max-width: 520px) {
-    .eid-scene { max-width: 100%; }
-    .eid-field { font-size: 9px; }
-  }
-
-  @media print {
-    .no-print, .navbar-pdao, .sidebar, .footer-pdao { display: none !important; }
-    .eid-scene { max-width: 3.5in; perspective: none; }
-    .eid-card-3d {
-      transform: none !important;
-      transition: none !important;
-      box-shadow: none !important;
-    }
-    .eid-face {
-      position: relative;
-      transform: none !important;
-      backface-visibility: visible;
-      -webkit-backface-visibility: visible;
-      page-break-inside: avoid;
-    }
-    .eid-back-face { transform: none; margin-top: 0.3in; }
-    body { background: #fff !important; }
-  }
-`
-
-export default function EidCard({ application, photoUrl, flipped, onFlip }: EidCardProps) {
-    const fullName = appFullName(application) || '—'
-    const address = [
-        application.address,
-        application.barangay,
-        application.municipality,
-        application.province,
-    ].filter(Boolean).join(', ')
-
-    const disability =
-        application.disability_type ??
-        (application.disability_types ?? []).join(', ') ??
-        '—'
-
-    const pwdNumber =
-        application.pwd_number || `PDAO-${application.id.slice(0, 8).toUpperCase()}`
-
-    const birthDate = fmtDate(application.birth_date)
-    const gender = application.gender
-
-    return (
-        <div className="eid-page-wrapper">
-            <style>{styles}</style>
-
-            <div className="eid-scene">
-                <div
-                    className={`eid-card-3d${flipped ? ' flipped' : ''}`}
-                    onClick={onFlip}
-                    style={{ cursor: onFlip ? 'pointer' : 'default' }}
-                >
-
-                    {/* ═══════════════ FRONT ═══════════════ */}
-                    <div className="eid-face">
-                        <img
-                            src="https://cdn.postimage.me/2026/09/06/pwd-front.jpeg"
-                            alt=""
-                            className="eid-bg"
-                        />
-
-                        {/* Name – bottom aligned with underline */}
-                        <div
-                            className="eid-field"
-                            style={{
-                                top: '41%',
-                                left: '14%',
-                                width: '52%',
-                                textAlign: 'center',
-                            }}
-                        >
-                            {fullName}
-                        </div>
-
-                        {/* Disability – bottom aligned with underline */}
-                        <div
-                            className="eid-field"
-                            style={{
-                                top: '62%',
-                                left: '14%',
-                                width: '52%',
-                                textAlign: 'center',
-                            }}
-                        >
-                            {disability}
-                        </div>
-
-                        {/* Photo box – refined */}
-                        <div
-                            className="eid-photo-wrap"
-                            style={{
-                                top: '26%',
-                                left: '70%',
-                                width: '25%',
-                                height: '54%',
-                            }}
-                        >
-                            {photoUrl ? (
-                                <img src={photoUrl} alt="Applicant" />
-                            ) : (
-                                <div className="eid-photo-empty">
-                                    <svg
-                                        width="28"
-                                        height="28"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="#bbb"
-                                        strokeWidth="1.5"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                    >
-                                        <circle cx="12" cy="8" r="4" />
-                                        <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
-                                    </svg>
-                                    <span>Photo</span>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* ID Number – centered and adjusted */}
-                        <div
-                            className="eid-field"
-                            style={{
-                                top: '83%',
-                                left: '70%',
-                                width: '28%',
-                                fontSize: '9px',
-                                textAlign: 'center',
-                            }}
-                        >
-                            {pwdNumber}
-                        </div>
-                    </div>
-
-                    {/* ═══════════════ BACK (unchanged) ═══════════════ */}
-                    <div className="eid-face eid-back-face">
-                        <img
-                            src="https://cdn.postimage.me/2026/09/06/pwd-back.jpeg"
-                            alt=""
-                            className="eid-bg"
-                        />
-
-                        <div className="eid-field" style={{ top: '12.1%', left: '16.6%', width: '52%' }}>
-                            {address || '—'}
-                        </div>
-                        <div className="eid-field" style={{ top: '17.4%', left: '21.3%', width: '40%' }}>
-                            {birthDate}
-                        </div>
-                        <div className="eid-field" style={{ top: '23.0%', left: '20.0%', width: '40%' }}>
-                            {fmtDate(application.last_updated)}
-                        </div>
-                        <div className="eid-field" style={{ top: '9.7%', left: '76.9%', width: '20%' }}>
-                            {gender ?? '—'}
-                        </div>
-                        <div className="eid-field" style={{ top: '15.2%', left: '76.9%', width: '20%' }}>
-                            {application.blood_type ?? '—'}
-                        </div>
-                        <div className="eid-field" style={{ top: '47.4%', left: '16.6%', width: '50%' }}>
-                            {application.emergency_name || '—'}
-                        </div>
-                        <div className="eid-field" style={{ top: '53.1%', left: '16.6%', width: '50%' }}>
-                            {application.emergency_contact_number || '—'}
-                        </div>
-                    </div>
-
-                </div>
-            </div>
-        </div>
-    )
-}
+  {/* ID Number */}
+  <div
+    style={{
+      position: 'absolute',
+      top: '83%',
+      left: '70%',
+      width: '28%',
+      fontSize: '9px',
+      textAlign: 'center',
+      zIndex: 2,
+      fontFamily: 'Arial,sans-serif',
+      fontWeight: '700',
+      color: '#111',
+      textShadow: '0 0 4px #fff,0 0 4px #fff,0 0 7px rgba(255,255,255,0.9)',
+      lineHeight: 1,
+      transform: 'translateY(-50%)',
+    }}
+  >
+    {pwdNumber}
+  </div>
+</div>
