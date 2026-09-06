@@ -48,7 +48,7 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
           transform: rotateY(180deg);
         }
         
-        /* Background Image Layer (Sits at the bottom) */
+        /* Background Image Layer */
         .eid-bg-img {
           position: absolute;
           top: 0;
@@ -59,7 +59,7 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
           z-index: 0;
         }
 
-        /* Text positioning (Sits on top of the image) */
+        /* Text positioning */
         .front-field, .back-field {
           position: absolute;
           font-family: Arial, sans-serif;
@@ -107,7 +107,7 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
           
           {/* FRONT */}
           <div className="eid-face eid-front">
-            {/* Corrected path to include /images/ */}
+            {/* Your local front image (you can replace this with a direct link too) */}
             <img src="/images/pwd-front.png" alt="Front Background" className="eid-bg-img" />
             
             <div className="front-field" style={{ top: '41%', left: '10%', width: '48%' }}>
@@ -136,8 +136,8 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
 
           {/* BACK */}
           <div className="eid-face eid-back">
-            {/* Corrected path to include /images/ */}
-            <img src="/images/pwd-back.png" alt="Back Background" className="eid-bg-img" />
+            {/* Your direct embedded link for the back */}
+            <img src="https://cdn.postimage.me/2026/09/06/pwd-back.jpeg" alt="Back Background" className="eid-bg-img" />
             
             <div className="back-field" style={{ top: '35%', left: '10%', width: '50%' }}>
               {address}
