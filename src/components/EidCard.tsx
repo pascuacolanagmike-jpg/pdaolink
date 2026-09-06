@@ -16,82 +16,154 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
   const gender = application.gender
 
   return (
-    <div className="eid-scene">
-      <div className={`eid-card-3d ${flipped ? 'flipped' : ''}`} onClick={onFlip} style={onFlip ? {} : { cursor: 'default' }}>
-        {/* Front */}
-        <div className="eid-face eid-front">
-          <div className="eid-header-bar">
-            <div className="d-flex justify-content-between align-items-center">
-              <div className="eid-gov-label">Republic of the Philippines</div>
-              <div className="eid-id-badge">PWD ID</div>
-            </div>
-            <div className="eid-office-label">PDAO — Persons with Disability Affairs Office</div>
-          </div>
-          <div className="eid-body">
-            <div className="eid-photo-box">
-              {photoUrl
-                ? <img src={photoUrl} alt="Applicant" className="eid-photo" />
-                : <div className="eid-photo-placeholder"><i className="bi bi-person" /></div>}
-            </div>
-            <div className="eid-info">
-              <div className="eid-name">{fullName}</div>
-              <div className="eid-detail-row"><span className="eid-label">PWD No.</span><span className="eid-value">{pwdNumber}</span></div>
-              <div className="eid-detail-row"><span className="eid-label">Disability</span><span className="eid-value eid-value-sm">{disability}</span></div>
-              <div className="eid-detail-row"><span className="eid-label">Date of Birth</span><span className="eid-value">{birthDate}</span></div>
-              <div className="eid-detail-row"><span className="eid-label">Gender</span><span className="eid-value">{gender ?? '—'}</span></div>
-            </div>
-          </div>
-          <div className="eid-footer-bar">
-            <span>Valid until renewed</span>
-            <span>Issued: {fmtDate(application.last_updated)}</span>
-          </div>
-        </div>
+    <>
+      {/* ALL CSS EMBEDDED HERE - NO EXTERNAL CSS FILE NEEDED */}
+      <style>{`
+        .eid-scene {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          perspective: 1000px;
+          padding: 20px;
+        }
+        .eid-card-3d {
+          width: 500px;
+          height: 315px;
+          position: relative;
+          transform-style: preserve-3d;
+          transition: transform 0.6s;
+        }
+        .eid-card-3d.flipped {
+          transform: rotateY(180deg);
+        }
+        .eid-face {
+          position: absolute;
+          width: 100%;
+          height: 100%;
+          backface-visibility: hidden;
+          border-radius: 8px;
+          overflow: hidden;
+          box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+          background-size: cover;
+          background-position: center;
+        }
+        .eid-front {
+          background-image: url('/pwd-front.png');
+        }
+        .eid-back {
+          background-image: url('/pwd-back.png');
+          transform: rotateY(180deg);
+        }
+        
+        /* Text positioning over the image's black lines */
+        .front-field, .back-field {
+          position: absolute;
+          font-family: Arial, sans-serif;
+          font-size: 15px;
+          font-weight: 600;
+          color: black;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          line-height: 1.2;
+          padding: 0 5px;
+        }
 
-        {/* Back */}
-        <div className="eid-face eid-back">
-          <div className="eid-header-bar eid-header-bar-back">
-            <div className="eid-gov-label">PWD ID — Back</div>
+        /* Photo Box Overlay */
+        .photo-overlay {
+          position: absolute;
+          border: 1px solid black;
+          background-color: white;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          overflow: hidden;
+        }
+        .photo-img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+
+        /* Mobile responsiveness */
+        @media (max-width: 600px) {
+          .eid-card-3d {
+            width: 350px;
+            height: 220px;
+          }
+          .front-field, .back-field {
+            font-size: 12px;
+          }
+        }
+      `}</style>
+
+      <div className="eid-scene">
+        <div className={`eid-card-3d ${flipped ? 'flipped' : ''}`} onClick={onFlip} style={onFlip ? {} : { cursor: 'default' }}>
+          
+          {/* FRONT */}
+          <div className="eid-face eid-front">
+            
+            {/* Name (Over line) */}
+            <div className="front-field" style={{ top: '41%', left: '10%', width: '48%' }}>
+              {fullName}
+            </div>
+            
+            {/* Type of Disability (Over line) */}
+            <div className="front-field" style={{ top: '59%', left: '10%', width: '48%' }}>
+              {disability}
+            </div>
+
+            {/* Signature (Leave empty for physical signature) */}
+            <div className="front-field" style={{ top: '77%', left: '10%', width: '40%' }}>
+            </div>
+
+            {/* Photo Box */}
+            <div className="photo-overlay" style={{ top: '26%', left: '68%', width: '27%', height: '55%' }}>
+              {photoUrl ? (
+                <img src={photoUrl} alt="Applicant" className="photo-img" />
+              ) : (
+                <div className="photo-placeholder"></div>
+              )}
+            </div>
+
+            {/* ID No. */}
+            <div className="front-field" style={{ top: '84%', left: '70%', width: '25%' }}>
+              {pwdNumber}
+            </div>
           </div>
-          <div className="eid-back-body">
-            <div className="eid-back-section">
-              <div className="eid-back-label">Address</div>
-              <div className="eid-back-value">{address || '—'}</div>
+
+          {/* BACK */}
+          <div className="eid-face eid-back">
+            {/* Left Column - Address, DOB, Date Issued */}
+            <div className="back-field" style={{ top: '35%', left: '10%', width: '50%' }}>
+              {address}
             </div>
-            <div className="eid-back-section">
-              <div className="eid-back-label">Contact Number</div>
-              <div className="eid-back-value">{application.contact_number || application.mobile_no || '—'}</div>
+            <div className="back-field" style={{ top: '45%', left: '10%', width: '30%' }}>
+              {birthDate}
             </div>
-            <div className="eid-back-section">
-              <div className="eid-back-label">Emergency Contact</div>
-              <div className="eid-back-value">
-                {application.emergency_name || '—'}
-                {application.emergency_contact_number ? ` · ${application.emergency_contact_number}` : ''}
-              </div>
+            <div className="back-field" style={{ top: '55%', left: '10%', width: '30%' }}>
+              {fmtDate(application.last_updated)}
             </div>
-            <div className="eid-back-section">
-              <div className="eid-back-label">Blood Type</div>
-              <div className="eid-back-value">{application.blood_type ?? '—'}</div>
+
+            {/* Right Column - Sex, Blood Type */}
+            <div className="back-field" style={{ top: '35%', left: '70%', width: '20%' }}>
+              {gender ?? '—'}
             </div>
-            <div className="eid-back-section">
-              <div className="eid-back-label">Physician</div>
-              <div className="eid-back-value">{application.physician_name || '—'}</div>
+            <div className="back-field" style={{ top: '45%', left: '70%', width: '20%' }}>
+              {application.blood_type ?? '—'}
             </div>
-            <div className="eid-qr-area">
-              <div className="eid-qr-placeholder">
-                <i className="bi bi-qr-code" />
-              </div>
-              <div className="eid-qr-text">
-                <div>Scan to verify</div>
-                <div className="eid-qr-id">{pwdNumber}</div>
-              </div>
+
+            {/* Emergency Contact Section */}
+            <div className="back-field" style={{ top: '75%', left: '10%', width: '40%' }}>
+              {application.emergency_name || '—'}
+            </div>
+            <div className="back-field" style={{ top: '82%', left: '10%', width: '40%' }}>
+              {application.emergency_contact_number || '—'}
             </div>
           </div>
-          <div className="eid-footer-bar eid-footer-bar-back">
-            <span>This ID is non-transferable</span>
-            <span>PDAOLink Digital ID</span>
-          </div>
+
         </div>
       </div>
-    </div>
+    </>
   )
 }
