@@ -135,18 +135,18 @@ function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
 
               <div className="rounded-3 p-4 mb-4" style={{ background: '#f8f9fa' }}>
                 <p className="mb-3">
-                  To request a <strong>5‑minute test session</strong>, please contact the developer directly:
+                  To request a <strong>5‑minute test session</strong>, please text the developer manually at the number below:
                 </p>
                 <div className="d-flex align-items-center gap-3 mb-3">
-                  <i className="bi bi-telephone-fill text-primary" style={{ fontSize: '1.5rem' }} />
+                  <i className="bi bi-chat-dots-fill text-primary" style={{ fontSize: '1.5rem' }} />
                   <div>
-                    <div className="fw-bold">0912 345 6789</div>
-                    <div className="text-muted small">Available during business hours</div>
+                    <div className="fw-bold">09653720651</div>
+                    <div className="text-muted small">Send a text message to this number</div>
                   </div>
                 </div>
                 <p className="text-muted small mb-0">
                   <i className="bi bi-info-circle me-1" />
-                  After contacting the developer, you will receive a temporary access code. That code is valid for one 5‑minute session only.
+                  After texting, you will receive a temporary access code. That code is valid for one 5‑minute session only.
                 </p>
               </div>
 
@@ -166,7 +166,7 @@ function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
                   htmlFor="acknowledgeSwitch"
                   style={{ cursor: 'pointer' }}
                 >
-                  I have contacted the developer and received a temporary code
+                  I have texted the developer and received a temporary code
                 </label>
               </div>
 
