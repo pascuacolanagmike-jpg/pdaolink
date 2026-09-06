@@ -1,4 +1,4 @@
-import { type Application, type DocumentRow, appFullName, fmtDate } from '../lib/types'
+import { type Application, appFullName, fmtDate } from '../lib/types'
 
 interface EidCardProps {
   application: Application
@@ -49,29 +49,29 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
           transform: rotateY(180deg);
         }
         
-        /* Background Images - 'fill' ensures the percentages line up exactly with the image */
+        /* Background Images */
         .eid-bg-img {
           position: absolute;
           top: 0;
           left: 0;
           width: 100%;
           height: 100%;
-          object-fit: fill; /* Tweak to 'cover' if you want it cropped instead */
+          object-fit: fill;
           z-index: 0;
         }
 
         .front-field, .back-field {
           position: absolute;
           font-family: Arial, sans-serif;
-          font-size: 14px;
+          font-size: 13px;
           font-weight: 700;
           color: #111;
           white-space: nowrap; 
           overflow: hidden;
           text-overflow: ellipsis;
-          transform: translateY(-50%); /* Centers text perfectly on the black lines */
+          transform: translateY(-50%);
           line-height: 1;
-          text-shadow: 0 0 3px #fff, 0 0 3px #fff; /* White halo so text reads over buildings */
+          text-shadow: 0 0 3px #fff, 0 0 3px #fff;
           z-index: 1;
         }
 
@@ -93,7 +93,7 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
 
         @media (max-width: 600px) {
           .eid-card-3d { width: 350px; height: 220px; }
-          .front-field, .back-field { font-size: 11px; }
+          .front-field, .back-field { font-size: 10px; }
         }
       `}</style>
 
@@ -104,7 +104,7 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
           <div className="eid-face eid-front">
             <img src="/images/pwd-front.png" alt="Front Background" className="eid-bg-img" />
             
-            {/* Name (Right of the label) */}
+            {/* Name */}
             <div className="front-field" style={{ top: '42%', left: '30%', width: '40%' }}>{fullName}</div>
             
             {/* Type of Disability */}
@@ -126,22 +126,22 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
             <div className="front-field" style={{ top: '82.5%', left: '75%', width: '20%' }}>{pwdNumber}</div>
           </div>
 
-          {/* BACK - Adjusted to match your perfect screenshot */}
+          {/* BACK - Aligned to template lines */}
           <div className="eid-face eid-back">
             <img src="https://cdn.postimage.me/2026/09/06/pwd-back.jpeg" alt="Back Background" className="eid-bg-img" />
             
-            {/* Top Left Column (Starts at left: 30% to sit next to "Address:") */}
-            <div className="back-field" style={{ top: '28%', left: '30%', width: '40%' }}>{address}</div>
-            <div className="back-field" style={{ top: '35%', left: '30%', width: '30%' }}>{birthDate}</div>
-            <div className="back-field" style={{ top: '42%', left: '30%', width: '30%' }}>{fmtDate(application.last_updated)}</div>
+            {/* Top Left Column */}
+            <div className="back-field" style={{ top: '32.5%', left: '24%', width: '43%' }}>{address}</div>
+            <div className="back-field" style={{ top: '35.5%', left: '24%', width: '30%' }}>{birthDate}</div>
+            <div className="back-field" style={{ top: '38.5%', left: '24%', width: '30%' }}>{fmtDate(application.last_updated)}</div>
 
-            {/* Top Right Column (Starts at left: 74% to sit next to "Sex:") */}
-            <div className="back-field" style={{ top: '28%', left: '74%', width: '20%' }}>{gender ?? '—'}</div>
-            <div className="back-field" style={{ top: '35%', left: '74%', width: '20%' }}>{application.blood_type ?? '—'}</div>
+            {/* Top Right Column */}
+            <div className="back-field" style={{ top: '31.5%', left: '73%', width: '20%' }}>{gender ?? '—'}</div>
+            <div className="back-field" style={{ top: '34.5%', left: '73%', width: '20%' }}>{application.blood_type ?? '—'}</div>
 
-            {/* Emergency Contact Info (Sits below the red text, next to "Name:" and "Contact No.") */}
-            <div className="back-field" style={{ top: '65%', left: '30%', width: '40%' }}>{application.emergency_name || '—'}</div>
-            <div className="back-field" style={{ top: '72%', left: '30%', width: '40%' }}>{application.emergency_contact_number || '—'}</div>
+            {/* Emergency Contact Info (Aligned with lower section labels) */}
+            <div className="back-field" style={{ top: '51.5%', left: '24%', width: '40%' }}>{application.emergency_name || '—'}</div>
+            <div className="back-field" style={{ top: '54.5%', left: '24%', width: '40%' }}>{application.emergency_contact_number || '—'}</div>
           </div>
 
         </div>
