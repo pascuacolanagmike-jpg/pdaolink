@@ -206,7 +206,7 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
               Emerg Contact   → left: 16.6%  top: 53.1%
           */}
           <div className="eid-face eid-back-face">
-            <img src="/images/pwd-back.png" alt="" className="eid-bg" />
+            <img src="https://cdn.postimage.me/2026/09/06/pwd-back.jpeg" alt="" className="eid-bg" />
 
             {/* Address */}
             <div className="eid-field" style={{ top: '12.1%', left: '16.6%', width: '52%' }}>
