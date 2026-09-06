@@ -159,7 +159,7 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
 
           {/* ═══════════════ FRONT ═══════════════ */}
           <div className="eid-face">
-            <img src="/images/pwd-front.png" alt="" className="eid-bg" />
+            <img src="https://cdn.postimage.me/2026/09/06/pwd-front.jpeg" alt="" className="eid-bg" />
 
             {/* Name — adjust top/left to match your front image label line */}
             <div className="eid-field" style={{ top: '42%', left: '30%', width: '37%' }}>
