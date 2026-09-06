@@ -31,18 +31,15 @@ const styles = `
   .eid-face {
     position: absolute;
     inset: 0;
-    border-radius: 12px;
+    border-radius: 8px;
     backface-visibility: hidden;
     -webkit-backface-visibility: hidden;
     overflow: hidden;
     box-shadow: 0 8px 32px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.12);
   }
 
-  .eid-back-face {
-    transform: rotateY(180deg);
-  }
+  .eid-back-face { transform: rotateY(180deg); }
 
-  /* Background images fill the card exactly */
   .eid-bg {
     position: absolute;
     inset: 0;
@@ -53,7 +50,6 @@ const styles = `
     z-index: 0;
   }
 
-  /* All overlaid text fields */
   .eid-field {
     position: absolute;
     z-index: 2;
@@ -64,23 +60,21 @@ const styles = `
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    /* vertically center on the label line */
     transform: translateY(-50%);
     line-height: 1;
-    /* white halo so text is readable over the building background */
     text-shadow:
       0 0 4px #fff,
       0 0 4px #fff,
       0 0 7px rgba(255,255,255,0.9);
   }
 
-  /* Photo overlay on front */
   .eid-photo-wrap {
     position: absolute;
     z-index: 2;
     overflow: hidden;
-    background: #ddd;
-    border: 2px solid #444;
+    background: #e8e8e8;
+    border: 2px solid #555;
+    border-radius: 2px;
   }
   .eid-photo-wrap img {
     width: 100%;
@@ -96,7 +90,7 @@ const styles = `
     align-items: center;
     justify-content: center;
     gap: 4px;
-    color: #999;
+    color: #aaa;
     font-size: 10px;
     font-family: Arial, sans-serif;
   }
@@ -127,8 +121,8 @@ const styles = `
 `
 
 export default function EidCard({ application, photoUrl, flipped, onFlip }: EidCardProps) {
-  const fullName  = appFullName(application) || '—'
-  const address   = [
+  const fullName = appFullName(application) || '—'
+  const address  = [
     application.address,
     application.barangay,
     application.municipality,
@@ -157,56 +151,74 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
           style={{ cursor: onFlip ? 'pointer' : 'default' }}
         >
 
-          {/* ═══════════════ FRONT ═══════════════ */}
+          {/* ═══════════════ FRONT ═══════════════
+              Positions measured from pwd-front.jpeg:
+              Name value         → top: 41%   left: 14%
+              Disability value   → top: 62%   left: 14%
+              Photo box          → top: 26%   left: 70%   w: 25%  h: 54%
+              ID Number          → top: 83%   left: 70%
+          */}
           <div className="eid-face">
-            <img src="https://cdn.postimage.me/2026/09/06/pwd-front.jpeg" alt="" className="eid-bg" />
+            <img
+              src="https://cdn.postimage.me/2026/09/06/pwd-front.jpeg"
+              alt=""
+              className="eid-bg"
+            />
 
-            {/* Name — adjust top/left to match your front image label line */}
-            <div className="eid-field" style={{ top: '42%', left: '30%', width: '37%' }}>
+            {/* Name — sits ON the Name underline */}
+            <div className="eid-field" style={{ top: '41%', left: '14%', width: '52%' }}>
               {fullName}
             </div>
 
-            {/* Type of Disability */}
-            <div className="eid-field" style={{ top: '59%', left: '30%', width: '37%' }}>
+            {/* Type of Disability — sits ON the Type of Disability underline */}
+            <div className="eid-field" style={{ top: '62%', left: '14%', width: '52%' }}>
               {disability}
             </div>
 
-            {/* Photo box — right side */}
-            <div className="eid-photo-wrap" style={{ top: '27%', left: '69.5%', width: '24.5%', height: '57%' }}>
-              {photoUrl
-                ? <img src={photoUrl} alt="Applicant" />
-                : (
-                  <div className="eid-photo-empty">
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none"
-                      stroke="#bbb" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="8" r="4" />
-                      <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
-                    </svg>
-                    <span>Photo</span>
-                  </div>
-                )
-              }
+            {/* Photo box */}
+            <div
+              className="eid-photo-wrap"
+              style={{ top: '26%', left: '70%', width: '25%', height: '54%' }}
+            >
+              {photoUrl ? (
+                <img src={photoUrl} alt="Applicant" />
+              ) : (
+                <div className="eid-photo-empty">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none"
+                    stroke="#bbb" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="8" r="4" />
+                    <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
+                  </svg>
+                  <span>Photo</span>
+                </div>
+              )}
             </div>
 
-            {/* ID Number */}
-            <div className="eid-field" style={{ top: '82.5%', left: '73%', width: '24%', fontSize: '10px' }}>
+            {/* ID Number — bottom right corner */}
+            <div
+              className="eid-field"
+              style={{ top: '83%', left: '70%', width: '28%', fontSize: '9px' }}
+            >
               {pwdNumber}
             </div>
           </div>
 
-          {/* ═══════════════ BACK ═══════════════ */}
-          {/*
-            Positions measured from pwd-back.png (1008 × 639 px):
-              Address value   → left: 16.6%  top: 12.1%
-              Birth value     → left: 21.3%  top: 17.4%
-              Issued value    → left: 20.0%  top: 23.0%
-              Sex value       → left: 76.9%  top:  9.7%
-              Blood value     → left: 76.9%  top: 15.2%
-              Emerg Name      → left: 16.6%  top: 47.4%
-              Emerg Contact   → left: 16.6%  top: 53.1%
+          {/* ═══════════════ BACK ═══════════════
+              Positions measured from pwd-back.png (1008 × 639 px):
+              Address value   → top: 12.1%  left: 16.6%
+              Birth value     → top: 17.4%  left: 21.3%
+              Issued value    → top: 23.0%  left: 20.0%
+              Sex value       → top:  9.7%  left: 76.9%
+              Blood value     → top: 15.2%  left: 76.9%
+              Emerg Name      → top: 47.4%  left: 16.6%
+              Emerg Contact   → top: 53.1%  left: 16.6%
           */}
           <div className="eid-face eid-back-face">
-            <img src="https://cdn.postimage.me/2026/09/06/pwd-back.jpeg" alt="" className="eid-bg" />
+            <img
+              src="https://cdn.postimage.me/2026/09/06/pwd-back.jpeg"
+              alt=""
+              className="eid-bg"
+            />
 
             {/* Address */}
             <div className="eid-field" style={{ top: '12.1%', left: '16.6%', width: '52%' }}>
@@ -233,12 +245,12 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
               {application.blood_type ?? '—'}
             </div>
 
-            {/* Emergency — Name */}
+            {/* Emergency Name */}
             <div className="eid-field" style={{ top: '47.4%', left: '16.6%', width: '50%' }}>
               {application.emergency_name || '—'}
             </div>
 
-            {/* Emergency — Contact No. */}
+            {/* Emergency Contact */}
             <div className="eid-field" style={{ top: '53.1%', left: '16.6%', width: '50%' }}>
               {application.emergency_contact_number || '—'}
             </div>
