@@ -50,6 +50,7 @@ const styles = `
     z-index: 0;
   }
 
+  /* Front text fields – now aligned to sit ON the underline */
   .eid-field {
     position: absolute;
     z-index: 2;
@@ -60,7 +61,8 @@ const styles = `
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    transform: translateY(-50%);
+    /* bottom of text touches the underline */
+    transform: translateY(-100%);
     line-height: 1;
     text-shadow:
       0 0 4px #fff,
@@ -68,15 +70,15 @@ const styles = `
       0 0 7px rgba(255,255,255,0.9);
   }
 
-  /* ---- Front photo - more professional ---- */
+  /* Professional photo box */
   .eid-photo-wrap {
     position: absolute;
     z-index: 2;
     overflow: hidden;
-    background: #f5f5f5;
-    border: 2px solid #d0d0d0;
-    border-radius: 6px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.10), inset 0 1px 3px rgba(0,0,0,0.04);
+    background: #f7f7f7;
+    border: 2px solid #ccc;
+    border-radius: 4px;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.08);
   }
   .eid-photo-wrap img {
     width: 100%;
@@ -98,7 +100,7 @@ const styles = `
     background: #f9f9f9;
   }
   .eid-photo-empty svg {
-    opacity: 0.6;
+    opacity: 0.5;
   }
 
   @media (max-width: 520px) {
@@ -157,10 +159,7 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
                     style={{ cursor: onFlip ? 'pointer' : 'default' }}
                 >
 
-                    {/* ═══════════════ FRONT ═══════════════
-                        Name & Disability now centered on their underlines.
-                        Photo box refined with subtle border + shadow.
-                    */}
+                    {/* ═══════════════ FRONT ═══════════════ */}
                     <div className="eid-face">
                         <img
                             src="https://cdn.postimage.me/2026/09/06/pwd-front.jpeg"
@@ -168,7 +167,7 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
                             className="eid-bg"
                         />
 
-                        {/* Name — centered on the underline placeholder */}
+                        {/* Name – bottom aligned with underline */}
                         <div
                             className="eid-field"
                             style={{
@@ -181,7 +180,7 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
                             {fullName}
                         </div>
 
-                        {/* Type of Disability — centered on its underline */}
+                        {/* Disability – bottom aligned with underline */}
                         <div
                             className="eid-field"
                             style={{
@@ -194,7 +193,7 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
                             {disability}
                         </div>
 
-                        {/* Photo box — cleaner, more polished */}
+                        {/* Photo box – refined */}
                         <div
                             className="eid-photo-wrap"
                             style={{
@@ -226,7 +225,7 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
                             )}
                         </div>
 
-                        {/* ID Number — bottom right corner */}
+                        {/* ID Number – centered and adjusted */}
                         <div
                             className="eid-field"
                             style={{
@@ -241,9 +240,7 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
                         </div>
                     </div>
 
-                    {/* ═══════════════ BACK ═══════════════
-                        (unchanged)
-                    */}
+                    {/* ═══════════════ BACK (unchanged) ═══════════════ */}
                     <div className="eid-face eid-back-face">
                         <img
                             src="https://cdn.postimage.me/2026/09/06/pwd-back.jpeg"
@@ -251,37 +248,24 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
                             className="eid-bg"
                         />
 
-                        {/* Address */}
                         <div className="eid-field" style={{ top: '12.1%', left: '16.6%', width: '52%' }}>
                             {address || '—'}
                         </div>
-
-                        {/* Date of Birth */}
                         <div className="eid-field" style={{ top: '17.4%', left: '21.3%', width: '40%' }}>
                             {birthDate}
                         </div>
-
-                        {/* Date Issued */}
                         <div className="eid-field" style={{ top: '23.0%', left: '20.0%', width: '40%' }}>
                             {fmtDate(application.last_updated)}
                         </div>
-
-                        {/* Sex */}
                         <div className="eid-field" style={{ top: '9.7%', left: '76.9%', width: '20%' }}>
                             {gender ?? '—'}
                         </div>
-
-                        {/* Blood Type */}
                         <div className="eid-field" style={{ top: '15.2%', left: '76.9%', width: '20%' }}>
                             {application.blood_type ?? '—'}
                         </div>
-
-                        {/* Emergency Name */}
                         <div className="eid-field" style={{ top: '47.4%', left: '16.6%', width: '50%' }}>
                             {application.emergency_name || '—'}
                         </div>
-
-                        {/* Emergency Contact */}
                         <div className="eid-field" style={{ top: '53.1%', left: '16.6%', width: '50%' }}>
                             {application.emergency_contact_number || '—'}
                         </div>
