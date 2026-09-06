@@ -150,7 +150,7 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
             <div
               style={{
                 position: 'absolute',
-                top: '40.5%',
+                top: '30%',
                 left: '5%',
                 width: '52%',
                 height: '5%',
@@ -211,8 +211,8 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
               className="eid-photo-wrap"
               style={{
                 top: '26%',
-                left: '70%',
-                width: '25%',
+                left: '68%',
+                width: '27%',
                 height: '54%',
               }}
             >
