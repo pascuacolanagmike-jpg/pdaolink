@@ -14,6 +14,11 @@ export default function ChangePasswordPage() {
   const [success, setSuccess] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
+  // Visibility states
+  const [showCurrent, setShowCurrent] = useState(false)
+  const [showNext, setShowNext] = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setErrors([])
@@ -52,18 +57,74 @@ export default function ChangePasswordPage() {
         <div className="card border-0 shadow-sm" style={{ maxWidth: 520 }}>
           <div className="card-body">
             <form onSubmit={handleSubmit}>
+              {/* Current password */}
               <div className="mb-3">
                 <label className="form-label">Current password</label>
-                <input type="password" className="form-control" value={current} onChange={(e) => setCurrent(e.target.value)} required />
+                <div className="position-relative">
+                  <input
+                    type={showCurrent ? 'text' : 'password'}
+                    className="form-control pe-5"
+                    value={current}
+                    onChange={(e) => setCurrent(e.target.value)}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary position-absolute top-50 end-0 translate-middle-y border-0 bg-transparent"
+                    onClick={() => setShowCurrent(!showCurrent)}
+                    aria-label={showCurrent ? 'Hide current password' : 'Show current password'}
+                  >
+                    <i className={`bi ${showCurrent ? 'bi-eye-slash' : 'bi-eye'}`} />
+                  </button>
+                </div>
               </div>
+
+              {/* New password */}
               <div className="mb-3">
                 <label className="form-label">New password</label>
-                <input type="password" className="form-control" value={next} onChange={(e) => setNext(e.target.value)} minLength={8} required />
+                <div className="position-relative">
+                  <input
+                    type={showNext ? 'text' : 'password'}
+                    className="form-control pe-5"
+                    value={next}
+                    onChange={(e) => setNext(e.target.value)}
+                    minLength={8}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary position-absolute top-50 end-0 translate-middle-y border-0 bg-transparent"
+                    onClick={() => setShowNext(!showNext)}
+                    aria-label={showNext ? 'Hide new password' : 'Show new password'}
+                  >
+                    <i className={`bi ${showNext ? 'bi-eye-slash' : 'bi-eye'}`} />
+                  </button>
+                </div>
               </div>
+
+              {/* Confirm new password */}
               <div className="mb-3">
                 <label className="form-label">Confirm new password</label>
-                <input type="password" className="form-control" value={confirm} onChange={(e) => setConfirm(e.target.value)} minLength={8} required />
+                <div className="position-relative">
+                  <input
+                    type={showConfirm ? 'text' : 'password'}
+                    className="form-control pe-5"
+                    value={confirm}
+                    onChange={(e) => setConfirm(e.target.value)}
+                    minLength={8}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary position-absolute top-50 end-0 translate-middle-y border-0 bg-transparent"
+                    onClick={() => setShowConfirm(!showConfirm)}
+                    aria-label={showConfirm ? 'Hide confirm password' : 'Show confirm password'}
+                  >
+                    <i className={`bi ${showConfirm ? 'bi-eye-slash' : 'bi-eye'}`} />
+                  </button>
+                </div>
               </div>
+
               <button type="submit" className="btn btn-primary" disabled={saving}>
                 {saving ? <><span className="spinner-border spinner-border-sm me-1" /> Updating…</> : <><i className="bi bi-key me-1" /> Update password</>}
               </button>
