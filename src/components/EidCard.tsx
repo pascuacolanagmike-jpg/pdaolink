@@ -17,7 +17,6 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
 
   return (
     <>
-      {/* ALL CSS EMBEDDED HERE - NO EXTERNAL CSS FILE NEEDED */}
       <style>{`
         .eid-scene {
           display: flex;
@@ -44,13 +43,12 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
           border-radius: 8px;
           overflow: hidden;
           box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-          background-color: white; /* Fallback if image fails */
         }
         .eid-back {
           transform: rotateY(180deg);
         }
         
-        /* The Background Image Layer */
+        /* Background Image Layer (Sits at the bottom) */
         .eid-bg-img {
           position: absolute;
           top: 0;
@@ -61,7 +59,7 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
           z-index: 0;
         }
 
-        /* Text positioning (z-index 1 to sit on top of the image) */
+        /* Text positioning (Sits on top of the image) */
         .front-field, .back-field {
           position: absolute;
           font-family: Arial, sans-serif;
@@ -93,7 +91,6 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
           object-fit: cover;
         }
 
-        /* Mobile responsiveness */
         @media (max-width: 600px) {
           .eid-card-3d {
             width: 350px;
@@ -110,24 +107,20 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
           
           {/* FRONT */}
           <div className="eid-face eid-front">
-            {/* BACKGROUND IMAGE - Change src if saved in a subfolder */}
-            <img src="/pwd-front.png" alt="Front Background" className="eid-bg-img" />
+            {/* Corrected path to include /images/ */}
+            <img src="/images/pwd-front.png" alt="Front Background" className="eid-bg-img" />
             
-            {/* Name (Over line) */}
             <div className="front-field" style={{ top: '41%', left: '10%', width: '48%' }}>
               {fullName}
             </div>
             
-            {/* Type of Disability (Over line) */}
             <div className="front-field" style={{ top: '59%', left: '10%', width: '48%' }}>
               {disability}
             </div>
 
-            {/* Signature (Leave empty for physical signature) */}
             <div className="front-field" style={{ top: '77%', left: '10%', width: '40%' }}>
             </div>
 
-            {/* Photo Box */}
             <div className="photo-overlay" style={{ top: '26%', left: '68%', width: '27%', height: '55%' }}>
               {photoUrl ? (
                 <img src={photoUrl} alt="Applicant" className="photo-img" />
@@ -136,7 +129,6 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
               )}
             </div>
 
-            {/* ID No. */}
             <div className="front-field" style={{ top: '84%', left: '70%', width: '25%' }}>
               {pwdNumber}
             </div>
@@ -144,10 +136,9 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
 
           {/* BACK */}
           <div className="eid-face eid-back">
-            {/* BACKGROUND IMAGE - Change src if saved in a subfolder */}
-            <img src="/pwd-back.png" alt="Back Background" className="eid-bg-img" />
+            {/* Corrected path to include /images/ */}
+            <img src="/images/pwd-back.png" alt="Back Background" className="eid-bg-img" />
             
-            {/* Left Column - Address, DOB, Date Issued */}
             <div className="back-field" style={{ top: '35%', left: '10%', width: '50%' }}>
               {address}
             </div>
@@ -158,7 +149,6 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
               {fmtDate(application.last_updated)}
             </div>
 
-            {/* Right Column - Sex, Blood Type */}
             <div className="back-field" style={{ top: '35%', left: '70%', width: '20%' }}>
               {gender ?? '—'}
             </div>
@@ -166,7 +156,6 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
               {application.blood_type ?? '—'}
             </div>
 
-            {/* Emergency Contact Section */}
             <div className="back-field" style={{ top: '75%', left: '10%', width: '40%' }}>
               {application.emergency_name || '—'}
             </div>
