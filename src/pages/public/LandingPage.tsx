@@ -6,16 +6,14 @@ import { fmtDate } from '../../lib/types'
 import { AutoSecurityPopup } from '../../components/SecurityPopup'
 
 /* ============================================================
-   DEVELOPER ACCESS GATE — Hidden Name + Slider Acknowledgment
+   DEVELOPER ACCESS GATE — OTP Verification (5‑Minute Test Session)
    ============================================================ */
 
-const AUTHORIZED_DEVELOPERS = ['Mike Pascua', 'Marie Joy De Guzman'] // kept hidden
+const DEFAULT_OTP = '44636' // Temporary access code for 5‑minute test sessions
 const EXIT_COUNTDOWN_SECONDS = 10
-const DEV_COST = '₱25,000.00'
-const SERVER_COST = '₱1,500.00/month'
 const ACCESS_KEY = 'pdaolink_dev_granted'
 
-type GateStep = 'acknowledge' | 'name' | 'denied' | 'granted'
+type GateStep = 'acknowledge' | 'otp' | 'denied' | 'granted'
 
 function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
   const [step, setStep] = useState<GateStep>(() => {
@@ -23,11 +21,11 @@ function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
     return saved === 'true' ? 'granted' : 'acknowledge'
   })
   const [acknowledged, setAcknowledged] = useState(false)
-  const [nameInput, setNameInput] = useState('')
+  const [otpInput, setOtpInput] = useState('')
   const [countdown, setCountdown] = useState(EXIT_COUNTDOWN_SECONDS)
   const [error, setError] = useState('')
 
-  /* ---------- countdown + forced exit for unauthorized names ---------- */
+  /* ---------- countdown + forced exit for wrong OTP ---------- */
   useEffect(() => {
     if (step !== 'denied') return
     if (countdown <= 0) {
@@ -55,34 +53,30 @@ function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
     return () => clearTimeout(timer)
   }, [step, countdown])
 
-  /* ---------- go to name entry after slider acknowledgment ---------- */
+  /* ---------- proceed to OTP entry after acknowledgment ---------- */
   const handleAcknowledge = useCallback(() => {
     if (acknowledged) {
-      setStep('name')
+      setStep('otp')
       setError('')
     }
   }, [acknowledged])
 
-  /* ---------- validate hidden name ---------- */
-  const handleNameSubmit = useCallback(() => {
-    const trimmed = nameInput.trim().toLowerCase()
-    const isAuthorized = AUTHORIZED_DEVELOPERS.some(
-      (dev) => dev.toLowerCase() === trimmed,
-    )
-
-    if (isAuthorized) {
+  /* ---------- validate OTP ---------- */
+  const handleOtpSubmit = useCallback(() => {
+    const trimmed = otpInput.trim()
+    if (trimmed === DEFAULT_OTP) {
       sessionStorage.setItem(ACCESS_KEY, 'true')
       setStep('granted')
     } else {
       setStep('denied')
       setCountdown(EXIT_COUNTDOWN_SECONDS)
     }
-  }, [nameInput])
+  }, [otpInput])
 
   /* ---------- reset gate ---------- */
   const handleReset = useCallback(() => {
     sessionStorage.removeItem(ACCESS_KEY)
-    setNameInput('')
+    setOtpInput('')
     setAcknowledged(false)
     setError('')
     setCountdown(EXIT_COUNTDOWN_SECONDS)
@@ -111,11 +105,11 @@ function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
           padding: '1rem',
         }}
       >
-        {/* ============ STEP 1: PAYWALL ACKNOWLEDGMENT ============ */}
+        {/* ============ STEP 1: ACKNOWLEDGMENT ============ */}
         {step === 'acknowledge' && (
           <div
             className="card border-0 shadow-lg"
-            style={{ maxWidth: 540, width: '100%', borderRadius: 16 }}
+            style={{ maxWidth: 540, width: '100%', maxHeight: '90vh', overflowY: 'auto', borderRadius: 16 }}
           >
             <div className="card-body p-4 p-md-5">
               <div className="text-center mb-4">
@@ -124,49 +118,39 @@ function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
                     width: 64,
                     height: 64,
                     borderRadius: 16,
-                    background: 'rgba(255,193,7,0.15)',
+                    background: 'rgba(13,110,253,0.1)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     margin: '0 auto 1rem',
                   }}
                 >
-                  <i className="bi bi-credit-card text-warning" style={{ fontSize: '1.75rem' }} />
+                  <i className="bi bi-lock-fill text-primary" style={{ fontSize: '1.75rem' }} />
                 </div>
-                <h4 className="fw-bold mb-1">Developer Access</h4>
+                <h4 className="fw-bold mb-1">Restricted Access</h4>
                 <p className="text-muted small mb-0">
-                  Please review the payment terms before proceeding.
+                  This system is currently in a testing phase.
                 </p>
               </div>
 
               <div className="rounded-3 p-4 mb-4" style={{ background: '#f8f9fa' }}>
-                <div className="d-flex justify-content-between align-items-center mb-3">
-                  <span className="fw-semibold">💻 Development Cost</span>
-                  <span className="fw-bold text-primary fs-5">{DEV_COST}</span>
+                <p className="mb-3">
+                  To request a <strong>5‑minute test session</strong>, please contact the developer directly:
+                </p>
+                <div className="d-flex align-items-center gap-3 mb-3">
+                  <i className="bi bi-telephone-fill text-primary" style={{ fontSize: '1.5rem' }} />
+                  <div>
+                    <div className="fw-bold">0912 345 6789</div>
+                    <div className="text-muted small">Available during business hours</div>
+                  </div>
                 </div>
-                <div className="d-flex justify-content-between align-items-center mb-3">
-                  <span className="fw-semibold">🖥️ Server Payment</span>
-                  <span className="fw-bold text-danger fs-5">{SERVER_COST}</span>
-                </div>
-                <hr className="my-3" />
                 <p className="text-muted small mb-0">
                   <i className="bi bi-info-circle me-1" />
-                  <strong>Note:</strong> Server payment is <u>separate</u> from the development
-                  cost. The development fee is a one-time charge, while the server fee is
-                  recurring monthly.
+                  After contacting the developer, you will receive a temporary access code. That code is valid for one 5‑minute session only.
                 </p>
               </div>
 
-              <div className="rounded-3 p-3 mb-4" style={{ background: '#e8f5e9' }}>
-                <p className="text-success small mb-0">
-                  <i className="bi bi-arrow-counterclockwise me-1" />
-                  <strong>Refund Policy:</strong> If you decide not to proceed, a{' '}
-                  <strong>full refund</strong> of the development payment will be issued. No
-                  questions asked.
-                </p>
-              </div>
-
-              {/* Slider acknowledgment */}
+              {/* Checkbox acknowledgment */}
               <div className="form-check form-switch mb-4">
                 <input
                   className="form-check-input"
@@ -182,7 +166,7 @@ function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
                   htmlFor="acknowledgeSwitch"
                   style={{ cursor: 'pointer' }}
                 >
-                  I understand the payment terms
+                  I have contacted the developer and received a temporary code
                 </label>
               </div>
 
@@ -191,14 +175,14 @@ function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
                 onClick={handleAcknowledge}
                 disabled={!acknowledged}
               >
-                <i className="bi bi-check-circle me-1" /> Continue
+                <i className="bi bi-check-circle me-1" /> Proceed to Code Entry
               </button>
             </div>
           </div>
         )}
 
-        {/* ============ STEP 2: HIDDEN NAME ENTRY ============ */}
-        {step === 'name' && (
+        {/* ============ STEP 2: OTP ENTRY ============ */}
+        {step === 'otp' && (
           <div
             className="card border-0 shadow-lg"
             style={{ maxWidth: 460, width: '100%', borderRadius: 16 }}
@@ -219,27 +203,30 @@ function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
                 >
                   <i className="bi bi-shield-lock text-primary" style={{ fontSize: '1.75rem' }} />
                 </div>
-                <h4 className="fw-bold mb-1">Identity Verification</h4>
+                <h4 className="fw-bold mb-1">Temporary Access Code</h4>
                 <p className="text-muted small mb-0">
-                  Enter your full name to verify access.
+                  Enter the code provided by the developer.
                 </p>
               </div>
 
               <div className="mb-3">
-                <label htmlFor="devName" className="form-label fw-semibold">
-                  Your full name
+                <label htmlFor="otpInput" className="form-label fw-semibold">
+                  Access code
                 </label>
                 <input
-                  id="devName"
+                  id="otpInput"
                   type="text"
-                  className="form-control form-control-lg"
-                  placeholder="e.g. Juan Dela Cruz"
-                  value={nameInput}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  className="form-control form-control-lg text-center"
+                  placeholder="•••••"
+                  maxLength={5}
+                  value={otpInput}
                   onChange={(e) => {
-                    setNameInput(e.target.value)
+                    setOtpInput(e.target.value.replace(/\D/g, ''))
                     setError('')
                   }}
-                  onKeyDown={(e) => e.key === 'Enter' && handleNameSubmit()}
+                  onKeyDown={(e) => e.key === 'Enter' && handleOtpSubmit()}
                   autoFocus
                 />
                 {error && <div className="text-danger small mt-1">{error}</div>}
@@ -248,17 +235,14 @@ function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
               <div className="d-grid gap-2">
                 <button
                   className="btn btn-primary btn-lg"
-                  onClick={handleNameSubmit}
-                  disabled={nameInput.trim().length < 3}
+                  onClick={handleOtpSubmit}
+                  disabled={otpInput.length !== 5}
                 >
-                  <i className="bi bi-check-lg me-1" /> Verify
+                  <i className="bi bi-check-lg me-1" /> Verify Code
                 </button>
                 <button
                   className="btn btn-outline-secondary"
-                  onClick={() => {
-                    setStep('acknowledge')
-                    setAcknowledged(false)
-                  }}
+                  onClick={() => setStep('acknowledge')}
                 >
                   <i className="bi bi-arrow-left me-1" /> Back
                 </button>
@@ -288,12 +272,12 @@ function DeveloperAccessGate({ children }: { children: React.ReactNode }) {
               >
                 <i className="bi bi-x-octagon-fill text-danger" style={{ fontSize: '2.25rem' }} />
               </div>
-              <h3 className="fw-bold text-danger mb-2">Access Denied</h3>
+              <h3 className="fw-bold text-danger mb-2">Invalid Code</h3>
               <p className="text-muted mb-1">
-                You are not authorized to access this system.
+                The code you entered is incorrect.
               </p>
               <p className="text-muted small mb-4">
-                Please contact the system administrator if you believe this is a mistake.
+                Please contact the developer if you believe this is a mistake.
               </p>
 
               <div className="display-4 fw-bold text-danger mb-3">{countdown}</div>
