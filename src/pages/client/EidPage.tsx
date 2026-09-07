@@ -106,7 +106,7 @@ export default function EidPage() {
         <div className="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-2 no-print">
           <div>
             <h3 className="mb-1">E-ID</h3>
-            <p className="text-muted mb-0">Your digital PWD ID card. Click the card to flip it.</p>
+            <p className="text-muted mb-0">Your digital PWD ID card. Click the card to flip it.</p>  
           </div>
           <button className="btn btn-primary" onClick={handlePrint}><i className="bi bi-printer me-1" /> Print E-ID</button>
         </div>
