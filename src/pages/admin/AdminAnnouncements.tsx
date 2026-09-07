@@ -7,9 +7,24 @@ import { supabase } from '../../lib/supabase'
 import { fmtDateTime, type Announcement } from '../../lib/types'
 import Alert from '../../components/Alert'
 
+// Define the comment type (can be moved to lib/types)
+interface AnnouncementComment {
+  id: string
+  announcement_id: string
+  user_id: string
+  content: string
+  created_at: string
+  updated_at?: string
+  user?: {
+    full_name?: string
+    avatar_url?: string
+  } | null
+}
+
 export default function AdminAnnouncements() {
   const { profile } = useAuth()
   const [items, setItems] = useState<Announcement[]>([])
+  const [comments, setComments] = useState<AnnouncementComment[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -29,6 +44,9 @@ export default function AdminAnnouncements() {
   const [editImagePreview, setEditImagePreview] = useState<string | null>(null)
   const editFileRef = useRef<HTMLInputElement>(null)
 
+  // Track which announcement's comments are expanded
+  const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set())
+
   const load = () => {
     supabase
       .from('announcements')
@@ -41,7 +59,38 @@ export default function AdminAnnouncements() {
       })
   }
 
-  useEffect(() => { load() }, [])
+  const loadComments = async () => {
+    const { data, error } = await supabase
+      .from('announcement_comments')
+      .select(`
+        *,
+        user:profiles ( full_name, avatar_url )
+      `)
+      .order('created_at', { ascending: true })
+
+    if (!error) {
+      setComments((data ?? []) as AnnouncementComment[])
+    }
+  }
+
+  useEffect(() => {
+    load()
+    loadComments()
+
+    // Optional: real-time subscription to refresh comments automatically
+    const channel = supabase
+      .channel('announcement-comments')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'announcement_comments' },
+        () => loadComments()
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [])
 
   const handleImageChange = (file: File | null, setFile: (f: File | null) => void, setPreview: (s: string | null) => void) => {
     if (file) {
@@ -135,6 +184,33 @@ export default function AdminAnnouncements() {
     await supabase.from('announcements').delete().eq('id', a.id)
     setSuccess('Announcement deleted.')
     load()
+    loadComments() // refresh comments too
+  }
+
+  const handleDeleteComment = async (commentId: string) => {
+    if (!confirm('Delete this comment?')) return
+    const { error } = await supabase
+      .from('announcement_comments')
+      .delete()
+      .eq('id', commentId)
+    if (error) {
+      setError(error.message)
+    } else {
+      setSuccess('Comment deleted.')
+      loadComments() // refresh
+    }
+  }
+
+  const toggleComments = (announcementId: string) => {
+    setExpandedComments(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(announcementId)) {
+        newSet.delete(announcementId)
+      } else {
+        newSet.add(announcementId)
+      }
+      return newSet
+    })
   }
 
   const getImageUrl = (path: string | null): string | null => {
@@ -207,6 +283,8 @@ export default function AdminAnnouncements() {
               <div className="row g-3">
                 {items.map((a) => {
                   const imgUrl = getImageUrl(a.image_path)
+                  const announcementComments = comments.filter(c => c.announcement_id === a.id)
+                  const isExpanded = expandedComments.has(a.id)
                   return (
                     <div className="col-12" key={a.id}>
                       <div className="card border-0 shadow-sm">
@@ -224,6 +302,44 @@ export default function AdminAnnouncements() {
                           </div>
                           <p className="text-muted small mb-2" style={{ whiteSpace: 'pre-wrap' }}>{a.content}</p>
                           <div className="text-muted small"><i className="bi bi-calendar3 me-1" />{fmtDateTime(a.created_at)}{a.expires_at && <span className="ms-2"><i className="bi bi-clock me-1" />Expires {fmtDateTime(a.expires_at)}</span>}</div>
+
+                          {/* Comments section */}
+                          <div className="mt-3">
+                            <button
+                              className="btn btn-sm btn-link p-0"
+                              onClick={() => toggleComments(a.id)}
+                            >
+                              <i className="bi bi-chat-left-text me-1" />
+                              Comments ({announcementComments.length})
+                              <i className={`bi ms-1 ${isExpanded ? 'bi-chevron-up' : 'bi-chevron-down'}`} />
+                            </button>
+
+                            {isExpanded && (
+                              <div className="mt-2">
+                                {announcementComments.length === 0 ? (
+                                  <p className="text-muted small mb-0">No comments yet.</p>
+                                ) : (
+                                  announcementComments.map(comment => (
+                                    <div key={comment.id} className="border-start ps-3 mb-2">
+                                      <div className="d-flex justify-content-between align-items-start">
+                                        <div className="small text-muted">
+                                          <strong>{comment.user?.full_name || 'Unknown'}</strong> · {fmtDateTime(comment.created_at)}
+                                        </div>
+                                        <button
+                                          className="btn btn-sm btn-outline-danger ms-2"
+                                          onClick={() => handleDeleteComment(comment.id)}
+                                        >
+                                          <i className="bi bi-trash" />
+                                        </button>
+                                      </div>
+                                      <p className="mb-0 small">{comment.content}</p>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            )}
+                          </div>
+
                           <button className="btn btn-sm btn-outline-danger mt-2" onClick={() => handleDelete(a)}><i className="bi bi-trash me-1" /> Delete</button>
                         </div>
                       </div>
@@ -238,6 +354,7 @@ export default function AdminAnnouncements() {
         </div>
       </div>
 
+      {/* Edit Modal (unchanged) */}
       <Modal show={showEdit} onHide={() => setShowEdit(false)}>
         <form onSubmit={handleEdit}>
           <Modal.Header closeButton><Modal.Title>Edit announcement</Modal.Title></Modal.Header>
