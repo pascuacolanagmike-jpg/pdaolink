@@ -22,8 +22,11 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true)
   const statusRef = useRef<any>(null)
   const disabilityRef = useRef<any>(null)
-  const [addressGroups, setAddressGroups] = useState<AddressGroup[]>([])
-  const [addrSearch, setAddrSearch] = useState('')
+
+  // New filter states
+  const [addrFilter, setAddrFilter] = useState('')
+  const [disabilityFilter, setDisabilityFilter] = useState('')
+  const [nameSearch, setNameSearch] = useState('')
 
   useEffect(() => {
     const now = new Date()
@@ -46,7 +49,6 @@ export default function ReportsPage() {
         if (a.disability_type) disabilityBreakdown[a.disability_type] = (disabilityBreakdown[a.disability_type] ?? 0) + 1
       })
       setApps(rows)
-      setAddressGroups(groupByAddress(rows))
       setStats({ total: rows.length, byStatus, daily: daily.count ?? 0, monthly: monthly.count ?? 0, clients: clients.count ?? 0, disabilityBreakdown })
       setLoading(false)
     })()
@@ -70,17 +72,19 @@ export default function ReportsPage() {
     datasets: [{ data: validDisabilities.map(([, v]) => v), backgroundColor: ['#0056b3', '#0d6efd', '#0a9396', '#198754', '#f59e0b', '#dc3545', '#6f42c1', '#20c997', '#fd7e14', '#adb5bd'] }],
   }
 
-  const filteredAddressGroups = addrSearch.trim()
-    ? addressGroups
-        .map((g) => ({
-          ...g,
-          applicants: g.applicants.filter((p) =>
-            p.name.toLowerCase().includes(addrSearch.toLowerCase()) ||
-            g.address.toLowerCase().includes(addrSearch.toLowerCase())
-          ),
-        }))
-        .filter((g) => g.applicants.length > 0)
-    : addressGroups
+  // Compute filtered applicants based on all three filters
+  const filteredApplicants = apps.filter((app) => {
+    const matchAddress = addrFilter.trim() === '' || app.address.toLowerCase().includes(addrFilter.toLowerCase())
+    const matchDisability = disabilityFilter === '' || app.disability_type === disabilityFilter
+    const matchName = nameSearch.trim() === '' || app.name.toLowerCase().includes(nameSearch.toLowerCase())
+    return matchAddress && matchDisability && matchName
+  })
+
+  const exportFiltered = (format: 'pdf' | 'excel') => {
+    const filename = `pdaolink-filtered-report.${format === 'pdf' ? 'pdf' : 'xlsx'}`
+    if (format === 'pdf') exportPDF(filteredApplicants, stats, filename)
+    else exportExcel(filteredApplicants, filename)
+  }
 
   if (loading) {
     return <AppLayout navItems={ADMIN_NAV}><div className="text-center py-5"><div className="spinner-border text-primary" /></div></AppLayout>
@@ -142,53 +146,76 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        {/* Address-based report */}
+        {/* Search Applicants Section */}
         <div className="card border-0 shadow-sm mt-4">
           <div className="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
-            <span><i className="bi bi-geo-alt text-primary-pdao me-1" /> Applicants by Address</span>
+            <span><i className="bi bi-search text-primary-pdao me-1" /> Search Applicants</span>
             <div className="d-flex gap-2">
-              <button className="btn btn-sm btn-primary" onClick={() => exportAddressPDF(filteredAddressGroups, 'pdaolink-address-report.pdf')} disabled={filteredAddressGroups.length === 0}>
+              <button className="btn btn-sm btn-primary" onClick={() => exportFiltered('pdf')} disabled={filteredApplicants.length === 0}>
                 <i className="bi bi-file-pdf me-1" />PDF
               </button>
-              <button className="btn btn-sm btn-soft" onClick={() => exportAddressExcel(filteredAddressGroups, 'pdaolink-address-report.xlsx')} disabled={filteredAddressGroups.length === 0}>
+              <button className="btn btn-sm btn-soft" onClick={() => exportFiltered('excel')} disabled={filteredApplicants.length === 0}>
                 <i className="bi bi-file-earmark-spreadsheet me-1" />Excel
               </button>
             </div>
           </div>
           <div className="card-body">
-            <div className="mb-3">
-              <input
-                type="text"
-                className="form-control"
-                placeholder="Search address or applicant name…"
-                value={addrSearch}
-                onChange={(e) => setAddrSearch(e.target.value)}
-              />
+            <div className="row g-3 mb-3">
+              <div className="col-md-4">
+                <label className="form-label small text-muted">Barangay / Address</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. Union Cauayan City"
+                  value={addrFilter}
+                  onChange={(e) => setAddrFilter(e.target.value)}
+                />
+              </div>
+              <div className="col-md-4">
+                <label className="form-label small text-muted">Disability Type</label>
+                <select
+                  className="form-select"
+                  value={disabilityFilter}
+                  onChange={(e) => setDisabilityFilter(e.target.value)}
+                >
+                  <option value="">All Disabilities</option>
+                  {DISABILITY_TYPES.map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-md-4">
+                <label className="form-label small text-muted">Name</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Search name…"
+                  value={nameSearch}
+                  onChange={(e) => setNameSearch(e.target.value)}
+                />
+              </div>
             </div>
-            {filteredAddressGroups.length > 0 ? (
+
+            {filteredApplicants.length > 0 ? (
               <div className="table-responsive">
                 <table className="table table-hover align-middle">
                   <thead>
                     <tr>
-                      <th style={{ width: '40%' }}>Address</th>
-                      <th className="text-center" style={{ width: '10%' }}>Applicants</th>
-                      <th>Names</th>
+                      <th>Name</th>
+                      <th>Address</th>
+                      <th>Disability</th>
+                      <th>Status</th>
+                      <th>Submitted</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredAddressGroups.map((g, i) => (
-                      <tr key={i}>
-                        <td><i className="bi bi-geo-alt-fill text-primary-pdao me-1" />{g.address}</td>
-                        <td className="text-center"><span className="badge bg-primary bg-opacity-10 text-primary-pdao fs-6">{g.count}</span></td>
-                        <td>
-                          {g.applicants.map((p, j) => (
-                            <div key={j} className="d-flex align-items-center gap-2 mb-1">
-                              <span className="fw-semibold">{p.name}</span>
-                              <span className={`badge status-badge ${statusColor(p.status)}`}>{p.status}</span>
-                              {p.disability !== '—' && <span className="text-muted small">{p.disability}</span>}
-                            </div>
-                          ))}
-                        </td>
+                    {filteredApplicants.map((app, idx) => (
+                      <tr key={idx}>
+                        <td className="fw-semibold">{app.name}</td>
+                        <td>{app.address}</td>
+                        <td>{app.disability_type || '—'}</td>
+                        <td><span className={`badge status-badge ${statusColor(app.status)}`}>{app.status}</span></td>
+                        <td>{new Date(app.submission_date).toLocaleDateString()}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -196,8 +223,8 @@ export default function ReportsPage() {
               </div>
             ) : (
               <div className="text-center text-muted py-4">
-                <i className="bi bi-geo-alt d-block mb-2" style={{ fontSize: '2rem' }} />
-                <p className="mb-0">No applicants found matching your search.</p>
+                <i className="bi bi-search d-block mb-2" style={{ fontSize: '2rem' }} />
+                <p className="mb-0">No applicants match your search criteria.</p>
               </div>
             )}
           </div>
