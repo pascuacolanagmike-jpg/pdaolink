@@ -9,9 +9,9 @@ export default function ApplicantsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [applications, setApplications] = useState<Application[]>([])
   const [loading, setLoading] = useState(true)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [showDeleteModal, setShowDeleteModal] = useState(false)
-  const [appToDelete, setAppToDelete] = useState<Application | null>(null)
+  const [hidingId, setHidingId] = useState<string | null>(null)
+  const [showHideModal, setShowHideModal] = useState(false)
+  const [appToHide, setAppToHide] = useState<Application | null>(null)
 
   const q = searchParams.get('q') ?? ''
   const statusFilter = searchParams.get('status') ?? ''
@@ -19,7 +19,11 @@ export default function ApplicantsPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    let query = supabase.from('applications').select('*')
+    let query = supabase
+      .from('applications')
+      .select('*')
+      .eq('is_deleted', false) // only show non-hidden records
+
     if (statusFilter && ALL_STATUSES.includes(statusFilter as any)) {
       query = query.eq('status', statusFilter)
     }
@@ -27,8 +31,13 @@ export default function ApplicantsPage() {
       query = query.eq('disability_type', disabilityFilter)
     }
     query = query.order('submission_date', { ascending: false })
+
     let { data, error } = await query
-    if (error) { setLoading(false); return }
+    if (error) {
+      console.error('Error loading applications:', error)
+      setLoading(false)
+      return
+    }
     let rows = (data ?? []) as Application[]
     if (q) {
       const lower = q.toLowerCase()
@@ -52,44 +61,41 @@ export default function ApplicantsPage() {
     setSearchParams(next)
   }
 
-  // Open modal and set the application to delete
-  const handleDeleteClick = (application: Application) => {
-    setAppToDelete(application)
-    setShowDeleteModal(true)
+  const handleHideClick = (application: Application) => {
+    setAppToHide(application)
+    setShowHideModal(true)
   }
 
-  // Perform deletion
-  const confirmDelete = async () => {
-    if (!appToDelete) return
+  const confirmHide = async () => {
+    if (!appToHide) return
 
-    setDeletingId(appToDelete.id)
+    setHidingId(appToHide.id)
     try {
       const { error } = await supabase
         .from('applications')
-        .delete()
-        .eq('id', appToDelete.id)
+        .update({ is_deleted: true }) // soft delete
+        .eq('id', appToHide.id)
 
       if (error) {
-        console.error('Error deleting application:', error)
-        alert('Failed to delete: ' + error.message)
+        console.error('Error hiding application:', error)
+        alert('Failed to hide: ' + error.message)
         return
       }
 
-      // Refresh list
       await load()
     } catch (err) {
       console.error('Unexpected error:', err)
       alert('An unexpected error occurred.')
     } finally {
-      setDeletingId(null)
-      setShowDeleteModal(false)
-      setAppToDelete(null)
+      setHidingId(null)
+      setShowHideModal(false)
+      setAppToHide(null)
     }
   }
 
-  const cancelDelete = () => {
-    setShowDeleteModal(false)
-    setAppToDelete(null)
+  const cancelHide = () => {
+    setShowHideModal(false)
+    setAppToHide(null)
   }
 
   return (
@@ -168,16 +174,17 @@ export default function ApplicantsPage() {
                             <i className="bi bi-eye me-1" /> Review
                           </Link>
                           <button
-                            className="btn btn-sm btn-outline-danger"
-                            onClick={() => handleDeleteClick(a)}
-                            disabled={deletingId === a.id}
+                            className="btn btn-sm btn-outline-warning"
+                            onClick={() => handleHideClick(a)}
+                            disabled={hidingId === a.id}
+                            title="Hide this applicant from the list"
                           >
-                            {deletingId === a.id ? (
+                            {hidingId === a.id ? (
                               <span className="spinner-border spinner-border-sm me-1" />
                             ) : (
-                              <i className="bi bi-trash me-1" />
+                              <i className="bi bi-eye-slash me-1" />
                             )}
-                            Delete
+                            Hide
                           </button>
                         </div>
                       </td>
@@ -197,8 +204,8 @@ export default function ApplicantsPage() {
         </div>
       </div>
 
-      {/* Custom Delete Confirmation Modal */}
-      {showDeleteModal && appToDelete && (
+      {/* Custom Hide Confirmation Modal */}
+      {showHideModal && appToHide && (
         <div className="modal-overlay" style={{
           position: 'fixed',
           top: 0,
@@ -221,24 +228,27 @@ export default function ApplicantsPage() {
           }}>
             <div className="modal-content">
               <div className="modal-header border-0 pb-0">
-                <h5 className="modal-title">Confirm Deletion</h5>
-                <button type="button" className="btn-close" onClick={cancelDelete}></button>
+                <h5 className="modal-title">Hide Applicant</h5>
+                <button type="button" className="btn-close" onClick={cancelHide}></button>
               </div>
               <div className="modal-body">
-                <p>Are you sure you want to delete <strong>{appFullName(appToDelete) || 'this applicant'}</strong>?</p>
-                <p className="text-muted small">This will remove the application record. Related documents and status logs may still exist unless deleted separately.</p>
+                <p>Are you sure you want to hide <strong>{appFullName(appToHide) || 'this applicant'}</strong>?</p>
+                <p className="text-muted small">
+                  This will remove the applicant from the list, but the record remains in the database. 
+                  You can restore it later if needed.
+                </p>
               </div>
               <div className="modal-footer border-0 justify-content-end">
-                <button className="btn btn-secondary" onClick={cancelDelete}>Cancel</button>
-                <button className="btn btn-danger" onClick={confirmDelete}>
-                  {deletingId === appToDelete.id ? (
+                <button className="btn btn-secondary" onClick={cancelHide}>Cancel</button>
+                <button className="btn btn-warning" onClick={confirmHide}>
+                  {hidingId === appToHide.id ? (
                     <>
                       <span className="spinner-border spinner-border-sm me-1" />
-                      Deleting…
+                      Hiding…
                     </>
                   ) : (
                     <>
-                      <i className="bi bi-trash me-1" /> Delete
+                      <i className="bi bi-eye-slash me-1" /> Hide
                     </>
                   )}
                 </button>
