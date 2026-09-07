@@ -60,24 +60,47 @@ export default function AdminAnnouncements() {
   }
 
   const loadComments = async () => {
-    const { data, error } = await supabase
+    // 1. Fetch all comments without join
+    const { data: commentsData, error: commentsError } = await supabase
       .from('announcement_comments')
-      .select(`
-        *,
-        user:profiles ( full_name, avatar_url )
-      `)
+      .select('*')
       .order('created_at', { ascending: true })
 
-    if (!error) {
-      setComments((data ?? []) as AnnouncementComment[])
+    if (commentsError) {
+      console.error('Failed to load comments:', commentsError.message)
+      return
     }
+
+    // 2. Get unique user IDs from comments
+    const userIds = [...new Set((commentsData ?? []).map((c: any) => c.user_id))]
+
+    // 3. Fetch profiles for those users
+    let profilesMap: Record<string, any> = {}
+    if (userIds.length > 0) {
+      const { data: profilesData, error: profilesError } = await supabase
+        .from('profiles')
+        .select('id, full_name, avatar_url')
+        .in('id', userIds)
+
+      if (!profilesError && profilesData) {
+        profilesMap = Object.fromEntries(profilesData.map((p: any) => [p.id, p]))
+      }
+    }
+
+    // 4. Merge user data into comments
+    const enrichedComments = (commentsData ?? []).map((comment: any) => ({
+      ...comment,
+      user: profilesMap[comment.user_id] || null,
+    }))
+
+    setComments(enrichedComments as AnnouncementComment[])
   }
 
   useEffect(() => {
     load()
     loadComments()
 
-    // Optional: real-time subscription to refresh comments automatically
+    // Real-time subscription for comments
     const channel = supabase
       .channel('announcement-comments')
       .on(
@@ -354,7 +377,7 @@ export default function AdminAnnouncements() {
         </div>
       </div>
 
-      {/* Edit Modal (unchanged) */}
+      {/* Edit Modal */}
       <Modal show={showEdit} onHide={() => setShowEdit(false)}>
         <form onSubmit={handleEdit}>
           <Modal.Header closeButton><Modal.Title>Edit announcement</Modal.Title></Modal.Header>
