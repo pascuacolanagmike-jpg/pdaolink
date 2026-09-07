@@ -57,6 +57,11 @@ export default function AdminEidPage() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
 
+  // NEW: selection state
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+
   useEffect(() => {
     ;(async () => {
       const { data } = await supabase
@@ -186,6 +191,55 @@ export default function AdminEidPage() {
     setSaveSuccess('E-ID information updated.')
   }
 
+  // --- NEW: selection & deletion logic ---
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    )
+  }
+
+  const toggleSelectAll = () => {
+    const allIds = filtered.map(a => a.application.id)
+    const allSelected = allIds.every(id => selectedIds.includes(id))
+    setSelectedIds(allSelected ? [] : allIds)
+  }
+
+  const deleteSelected = async () => {
+    if (selectedIds.length === 0) return
+    if (!window.confirm(`Delete ${selectedIds.length} selected E‑ID record(s)? This action cannot be undone.`)) return
+
+    setDeleting(true)
+    setDeleteError(null)
+
+    try {
+      // Optionally delete linked documents first (if needed)
+      // const { error: docError } = await supabase
+      //   .from('documents')
+      //   .delete()
+      //   .in('application_id', selectedIds)
+
+      const { error } = await supabase
+        .from('applications')
+        .delete()
+        .in('id', selectedIds)
+
+      if (error) throw error
+
+      // Remove from local state
+      setApplicants(prev => prev.filter(a => !selectedIds.includes(a.application.id)))
+      setSelectedIds([])
+      // If the deleted applicant is currently viewed in modal, close it
+      if (selected && selectedIds.includes(selected.application.id)) {
+        closeModal()
+      }
+      setDeleteError(null)
+    } catch (err: any) {
+      setDeleteError(err.message || 'Failed to delete selected records.')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   if (loading) {
     return (
       <AppLayout navItems={ADMIN_NAV}>
@@ -204,7 +258,27 @@ export default function AdminEidPage() {
               {applicants.length} approved applicant{applicants.length !== 1 ? 's' : ''} with generated E-ID cards
             </p>
           </div>
+          {/* NEW: Delete button */}
+          <div className="d-flex align-items-center gap-2">
+            {selectedIds.length > 0 && (
+              <button
+                className="btn btn-danger btn-sm"
+                onClick={deleteSelected}
+                disabled={deleting}
+              >
+                {deleting ? (
+                  <><span className="spinner-border spinner-border-sm me-1" /> Deleting…</>
+                ) : (
+                  <><i className="bi bi-trash3 me-1" /> Delete Selected ({selectedIds.length})</>
+                )}
+              </button>
+            )}
+          </div>
         </div>
+
+        {deleteError && (
+          <Alert variant="danger" message={deleteError} className="mb-3" />
+        )}
 
         <div className="card border-0 shadow-sm mb-4">
           <div className="card-body">
@@ -237,6 +311,15 @@ export default function AdminEidPage() {
             <table className="table table-hover align-middle">
               <thead>
                 <tr>
+                  {/* NEW: select all checkbox */}
+                  <th style={{ width: '40px' }}>
+                    <input
+                      type="checkbox"
+                      className="form-check-input"
+                      checked={filtered.length > 0 && selectedIds.length === filtered.length}
+                      onChange={toggleSelectAll}
+                    />
+                  </th>
                   <th>Applicant</th>
                   <th>PWD No.</th>
                   <th>Disability</th>
@@ -252,6 +335,14 @@ export default function AdminEidPage() {
                   const pwdNumber = app.pwd_number || `PDAO-${app.id.slice(0, 8).toUpperCase()}`
                   return (
                     <tr key={app.id}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          className="form-check-input"
+                          checked={selectedIds.includes(app.id)}
+                          onChange={() => toggleSelect(app.id)}
+                        />
+                      </td>
                       <td className="fw-semibold">{appFullName(app)}</td>
                       <td><span className="badge bg-primary bg-opacity-10 text-primary-pdao">{pwdNumber}</span></td>
                       <td className="small">{app.disability_type ?? (app.disability_types ?? []).join(', ') ?? '—'}</td>
@@ -271,7 +362,7 @@ export default function AdminEidPage() {
         )}
       </div>
 
-      {/* E-ID Modal */}
+      {/* E-ID Modal (unchanged) */}
       {selected && (
         <>
           <div className="modal-backdrop fade show" onClick={closeModal} style={{ zIndex: 1050 }} />
