@@ -22,6 +22,8 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true)
   const statusRef = useRef<any>(null)
   const disabilityRef = useRef<any>(null)
+  const [addressGroups, setAddressGroups] = useState<AddressGroup[]>([])
+  const [addrSearch, setAddrSearch] = useState('')
 
   // New filter states
   const [addrFilter, setAddrFilter] = useState('')
@@ -49,6 +51,7 @@ export default function ReportsPage() {
         if (a.disability_type) disabilityBreakdown[a.disability_type] = (disabilityBreakdown[a.disability_type] ?? 0) + 1
       })
       setApps(rows)
+      setAddressGroups(groupByAddress(rows))
       setStats({ total: rows.length, byStatus, daily: daily.count ?? 0, monthly: monthly.count ?? 0, clients: clients.count ?? 0, disabilityBreakdown })
       setLoading(false)
     })()
@@ -72,18 +75,20 @@ export default function ReportsPage() {
     datasets: [{ data: validDisabilities.map(([, v]) => v), backgroundColor: ['#0056b3', '#0d6efd', '#0a9396', '#198754', '#f59e0b', '#dc3545', '#6f42c1', '#20c997', '#fd7e14', '#adb5bd'] }],
   }
 
-  // Compute filtered applicants based on all three filters
+  // Filter raw apps using type assertion to access name and address
   const filteredApplicants = apps.filter((app) => {
-    const matchAddress = addrFilter.trim() === '' || app.address.toLowerCase().includes(addrFilter.toLowerCase())
-    const matchDisability = disabilityFilter === '' || app.disability_type === disabilityFilter
-    const matchName = nameSearch.trim() === '' || app.name.toLowerCase().includes(nameSearch.toLowerCase())
-    return matchAddress && matchDisability && matchName
-  })
+    const a = app as any; // cast to any to bypass TypeScript errors
+    const matchAddress = addrFilter.trim() === '' || (a.address && a.address.toLowerCase().includes(addrFilter.toLowerCase()));
+    const matchDisability = disabilityFilter === '' || a.disability_type === disabilityFilter;
+    const matchName = nameSearch.trim() === '' || (a.name && a.name.toLowerCase().includes(nameSearch.toLowerCase()));
+    return matchAddress && matchDisability && matchName;
+  });
 
   const exportFiltered = (format: 'pdf' | 'excel') => {
     const filename = `pdaolink-filtered-report.${format === 'pdf' ? 'pdf' : 'xlsx'}`
-    if (format === 'pdf') exportPDF(filteredApplicants, stats, filename)
-    else exportExcel(filteredApplicants, filename)
+    // Pass the filtered applications as any[] to export functions
+    if (format === 'pdf') exportPDF(filteredApplicants as any, stats, filename)
+    else exportExcel(filteredApplicants as any, filename)
   }
 
   if (loading) {
@@ -209,15 +214,18 @@ export default function ReportsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredApplicants.map((app, idx) => (
-                      <tr key={idx}>
-                        <td className="fw-semibold">{app.name}</td>
-                        <td>{app.address}</td>
-                        <td>{app.disability_type || '—'}</td>
-                        <td><span className={`badge status-badge ${statusColor(app.status)}`}>{app.status}</span></td>
-                        <td>{new Date(app.submission_date).toLocaleDateString()}</td>
-                      </tr>
-                    ))}
+                    {filteredApplicants.map((app, idx) => {
+                      const a = app as any; // cast to any for rendering
+                      return (
+                        <tr key={idx}>
+                          <td className="fw-semibold">{a.name}</td>
+                          <td>{a.address}</td>
+                          <td>{a.disability_type || '—'}</td>
+                          <td><span className={`badge status-badge ${statusColor(a.status)}`}>{a.status}</span></td>
+                          <td>{new Date(a.submission_date).toLocaleDateString()}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
