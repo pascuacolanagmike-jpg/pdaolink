@@ -10,6 +10,8 @@ export default function ApplicantsPage() {
   const [applications, setApplications] = useState<Application[]>([])
   const [loading, setLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [appToDelete, setAppToDelete] = useState<Application | null>(null)
 
   const q = searchParams.get('q') ?? ''
   const statusFilter = searchParams.get('status') ?? ''
@@ -50,57 +52,44 @@ export default function ApplicantsPage() {
     setSearchParams(next)
   }
 
-  const handleDelete = async (applicationId: string) => {
-    if (!window.confirm('Are you sure you want to delete this applicant and all related data? This cannot be undone.')) {
-      return
-    }
+  // Open modal and set the application to delete
+  const handleDeleteClick = (application: Application) => {
+    setAppToDelete(application)
+    setShowDeleteModal(true)
+  }
 
-    setDeletingId(applicationId)
+  // Perform deletion
+  const confirmDelete = async () => {
+    if (!appToDelete) return
+
+    setDeletingId(appToDelete.id)
     try {
-      // 1. Delete related documents
-      const { error: docError } = await supabase
-        .from('documents')
-        .delete()
-        .eq('application_id', applicationId)
-
-      if (docError) {
-        console.error('Error deleting documents:', docError)
-        alert('Failed to delete related documents. Please try again.')
-        return
-      }
-
-      // 2. Delete status logs
-      const { error: logError } = await supabase
-        .from('status_logs')
-        .delete()
-        .eq('application_id', applicationId)
-
-      if (logError) {
-        console.error('Error deleting status logs:', logError)
-        alert('Failed to delete status logs. Please try again.')
-        return
-      }
-
-      // 3. Delete the application itself
-      const { error: appError } = await supabase
+      const { error } = await supabase
         .from('applications')
         .delete()
-        .eq('id', applicationId)
+        .eq('id', appToDelete.id)
 
-      if (appError) {
-        console.error('Error deleting application:', appError)
-        alert('Failed to delete the application. Please try again.')
+      if (error) {
+        console.error('Error deleting application:', error)
+        alert('Failed to delete: ' + error.message)
         return
       }
 
-      // 4. Refresh the list
+      // Refresh list
       await load()
     } catch (err) {
       console.error('Unexpected error:', err)
       alert('An unexpected error occurred.')
     } finally {
       setDeletingId(null)
+      setShowDeleteModal(false)
+      setAppToDelete(null)
     }
+  }
+
+  const cancelDelete = () => {
+    setShowDeleteModal(false)
+    setAppToDelete(null)
   }
 
   return (
@@ -180,7 +169,7 @@ export default function ApplicantsPage() {
                           </Link>
                           <button
                             className="btn btn-sm btn-outline-danger"
-                            onClick={() => handleDelete(a.id)}
+                            onClick={() => handleDeleteClick(a)}
                             disabled={deletingId === a.id}
                           >
                             {deletingId === a.id ? (
@@ -207,6 +196,57 @@ export default function ApplicantsPage() {
           </div>
         </div>
       </div>
+
+      {/* Custom Delete Confirmation Modal */}
+      {showDeleteModal && appToDelete && (
+        <div className="modal-overlay" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 1050
+        }}>
+          <div className="modal-dialog" style={{
+            backgroundColor: 'white',
+            borderRadius: '8px',
+            maxWidth: '400px',
+            width: '90%',
+            padding: '20px',
+            boxShadow: '0 4px 8px rgba(0,0,0,0.2)'
+          }}>
+            <div className="modal-content">
+              <div className="modal-header border-0 pb-0">
+                <h5 className="modal-title">Confirm Deletion</h5>
+                <button type="button" className="btn-close" onClick={cancelDelete}></button>
+              </div>
+              <div className="modal-body">
+                <p>Are you sure you want to delete <strong>{appFullName(appToDelete) || 'this applicant'}</strong>?</p>
+                <p className="text-muted small">This will remove the application record. Related documents and status logs may still exist unless deleted separately.</p>
+              </div>
+              <div className="modal-footer border-0 justify-content-end">
+                <button className="btn btn-secondary" onClick={cancelDelete}>Cancel</button>
+                <button className="btn btn-danger" onClick={confirmDelete}>
+                  {deletingId === appToDelete.id ? (
+                    <>
+                      <span className="spinner-border spinner-border-sm me-1" />
+                      Deleting…
+                    </>
+                  ) : (
+                    <>
+                      <i className="bi bi-trash me-1" /> Delete
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </AppLayout>
   )
 }
