@@ -15,11 +15,6 @@ export default function EidPage() {
   const [loading, setLoading] = useState(true)
   const [flipped, setFlipped] = useState(false)
 
-  // Delete modal state
-  const [showDeleteModal, setShowDeleteModal] = useState(false)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [deleted, setDeleted] = useState(false)
-
   useEffect(() => {
     if (!profile) return
     ;(async () => {
@@ -27,7 +22,6 @@ export default function EidPage() {
         .from('applications')
         .select('*')
         .eq('user_id', profile.id)
-        .eq('is_deleted', false) // only fetch non-deleted
         .order('submission_date', { ascending: false })
         .limit(1)
         .maybeSingle()
@@ -51,81 +45,24 @@ export default function EidPage() {
     })()
   }, [profile])
 
-  // Realtime subscription only if application exists and not deleted
   useEffect(() => {
-    if (!application || deleted) return
+    if (!application) return
     const channel = supabase
       .channel(`eid-${application.id}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'applications', filter: `id=eq.${application.id}` },
         (payload: any) => setApplication(payload.new as Application))
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [application?.id, deleted])
+  }, [application?.id])
 
   const handlePrint = () => window.print()
-
-  const handleDeleteClick = () => {
-    setShowDeleteModal(true)
-  }
-
-  const confirmDelete = async () => {
-    if (!application) return
-    setDeletingId(application.id)
-    try {
-      const { error } = await supabase
-        .from('applications')
-        .update({ is_deleted: true })
-        .eq('id', application.id)
-
-      if (error) {
-        console.error('Error deleting application:', error)
-        alert('Failed to delete: ' + error.message)
-        return
-      }
-
-      // Clear state and show deletion message
-      setApplication(null)
-      setPhotoDoc(null)
-      setPhotoUrl(null)
-      setDeleted(true)
-    } catch (err) {
-      console.error('Unexpected error:', err)
-      alert('An unexpected error occurred.')
-    } finally {
-      setDeletingId(null)
-      setShowDeleteModal(false)
-    }
-  }
-
-  const cancelDelete = () => {
-    setShowDeleteModal(false)
-  }
 
   if (loading) {
     return <AppLayout navItems={CLIENT_NAV}><div className="text-center py-5"><div className="spinner-border text-primary" /></div></AppLayout>
   }
 
-  // If deleted, show a success message
-  if (deleted) {
-    return (
-      <AppLayout navItems={CLIENT_NAV}>
-        <div className="fade-in-up">
-          <h3 className="mb-1">E-ID</h3>
-          <p className="text-muted mb-4">Your digital PWD ID card.</p>
-          <div className="card border-0 shadow-sm">
-            <div className="card-body empty-state">
-              <i className="bi bi-check-circle text-success d-block mb-2" style={{ fontSize: '2rem' }} />
-              <p className="mb-1">Your application has been deleted successfully.</p>
-              <p className="text-muted small mb-3">If this was a mistake, please contact the administrator.</p>
-              <Link to="/application" className="btn btn-primary">Submit a new application</Link>
-            </div>
-          </div>
-        </div>
-      </AppLayout>
-    )
-  }
+  const isApproved = application && (application.status === 'Approved' || application.status === 'Ready for Pickup')
 
-  // No application at all
   if (!application) {
     return (
       <AppLayout navItems={CLIENT_NAV}>
@@ -144,27 +81,12 @@ export default function EidPage() {
     )
   }
 
-  const isApproved = application && (application.status === 'Approved' || application.status === 'Ready for Pickup')
-
-  // Application exists but not approved
   if (!isApproved) {
     return (
       <AppLayout navItems={CLIENT_NAV}>
         <div className="fade-in-up">
-          <div className="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-2 no-print">
-            <div>
-              <h3 className="mb-1">E-ID</h3>
-              <p className="text-muted mb-0">Your digital PWD ID card.</p>
-            </div>
-            <button className="btn btn-outline-danger" onClick={handleDeleteClick} disabled={deletingId === application.id}>
-              {deletingId === application.id ? (
-                <span className="spinner-border spinner-border-sm me-1" />
-              ) : (
-                <i className="bi bi-trash me-1" />
-              )}
-              Delete Application
-            </button>
-          </div>
+          <h3 className="mb-1">E-ID</h3>
+          <p className="text-muted mb-4">Your digital PWD ID card.</p>
           <div className="card border-0 shadow-sm">
             <div className="card-body empty-state">
               <i className="bi bi-lock d-block mb-2" />
@@ -178,7 +100,6 @@ export default function EidPage() {
     )
   }
 
-  // Approved – show EID card with delete button
   return (
     <AppLayout navItems={CLIENT_NAV}>
       <div className="fade-in-up">
@@ -187,17 +108,7 @@ export default function EidPage() {
             <h3 className="mb-1">E-ID</h3>
             <p className="text-muted mb-0">Your digital PWD ID card. Click the card to flip it.</p>
           </div>
-          <div className="d-flex gap-2">
-            <button className="btn btn-primary" onClick={handlePrint}><i className="bi bi-printer me-1" /> Print E-ID</button>
-            <button className="btn btn-outline-danger" onClick={handleDeleteClick} disabled={deletingId === application.id}>
-              {deletingId === application.id ? (
-                <span className="spinner-border spinner-border-sm me-1" />
-              ) : (
-                <i className="bi bi-trash me-1" />
-              )}
-              Delete Application
-            </button>
-          </div>
+          <button className="btn btn-primary" onClick={handlePrint}><i className="bi bi-printer me-1" /> Print E-ID</button>
         </div>
 
         <div className="eid-page-wrapper">
@@ -219,59 +130,6 @@ export default function EidPage() {
           )}
         </div>
       </div>
-
-      {/* Delete Confirmation Modal */}
-      {showDeleteModal && application && (
-        <div className="modal-overlay" style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          width: '100%',
-          height: '100%',
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 1050
-        }}>
-          <div className="modal-dialog" style={{
-            backgroundColor: 'white',
-            borderRadius: '8px',
-            maxWidth: '400px',
-            width: '90%',
-            padding: '20px',
-            boxShadow: '0 4px 8px rgba(0,0,0,0.2)'
-          }}>
-            <div className="modal-content">
-              <div className="modal-header border-0 pb-0">
-                <h5 className="modal-title">Delete Application</h5>
-                <button type="button" className="btn-close" onClick={cancelDelete}></button>
-              </div>
-              <div className="modal-body">
-                <p>Are you sure you want to delete your application and E-ID?</p>
-                <p className="text-muted small">
-                  This action will remove your application from the system and you will no longer have access to this E-ID.
-                </p>
-              </div>
-              <div className="modal-footer border-0 justify-content-end">
-                <button className="btn btn-secondary" onClick={cancelDelete}>Cancel</button>
-                <button className="btn btn-danger" onClick={confirmDelete}>
-                  {deletingId === application.id ? (
-                    <>
-                      <span className="spinner-border spinner-border-sm me-1" />
-                      Deleting…
-                    </>
-                  ) : (
-                    <>
-                      <i className="bi bi-trash me-1" /> Delete
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </AppLayout>
   )
 }
