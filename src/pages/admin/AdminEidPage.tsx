@@ -57,7 +57,7 @@ export default function AdminEidPage() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
 
-  // NEW: selection state
+  // Selection & deletion state
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -191,7 +191,7 @@ export default function AdminEidPage() {
     setSaveSuccess('E-ID information updated.')
   }
 
-  // --- NEW: selection & deletion logic ---
+  // --- Selection & deletion ---
   const toggleSelect = (id: string) => {
     setSelectedIds(prev =>
       prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
@@ -258,7 +258,6 @@ export default function AdminEidPage() {
               {applicants.length} approved applicant{applicants.length !== 1 ? 's' : ''} with generated E-ID cards
             </p>
           </div>
-          {/* NEW: Delete button */}
           <div className="d-flex align-items-center gap-2">
             {selectedIds.length > 0 && (
               <button
@@ -276,8 +275,11 @@ export default function AdminEidPage() {
           </div>
         </div>
 
+        {/* Delete error alert – fixed by wrapping in a div with className */}
         {deleteError && (
-          <Alert variant="danger" message={deleteError} className="mb-3" />
+          <div className="mb-3">
+            <Alert variant="danger" message={deleteError} />
+          </div>
         )}
 
         <div className="card border-0 shadow-sm mb-4">
@@ -311,7 +313,6 @@ export default function AdminEidPage() {
             <table className="table table-hover align-middle">
               <thead>
                 <tr>
-                  {/* NEW: select all checkbox */}
                   <th style={{ width: '40px' }}>
                     <input
                       type="checkbox"
