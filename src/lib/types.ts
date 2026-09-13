@@ -225,6 +225,8 @@ export interface Application {
   // Section 21 - Physician
   physician_name: string | null
   physician_license_no: string | null
+  assistance_received: string[] | null
+  assistance_needed: string[] | null
 }
 
 export interface ApplicationInput {
