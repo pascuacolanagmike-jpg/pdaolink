@@ -7,6 +7,7 @@ import { supabase } from '../../lib/supabase'
 import {
   DOCUMENT_TYPES, MAX_UPLOAD_MB, ALLOWED_EXTENSIONS, prettyDocType,
   type Application, type DocumentRow, fmtDateTime,
+  docStatusBadge, DOC_STATUS_LABEL, type DocumentStatus,
 } from '../../lib/types'
 import Alert from '../../components/Alert'
 
@@ -63,7 +64,7 @@ export default function UploadPage() {
       else valid.push(f)
     })
     setErrors(errs)
-    setFiles(valid)
+    setFiles((prev) => [...prev, ...valid]) // append instead of replace
   }
 
   const onDrop = (e: DragEvent) => {
@@ -99,6 +100,8 @@ export default function UploadPage() {
         .select()
         .single()
       if (error) {
+        // Clean up orphaned storage file
+        await supabase.storage.from('documents').remove([path])
         errs.push(`${file.name}: ${error.message}`)
       } else {
         newDocs.push(data as DocumentRow)
@@ -120,14 +123,14 @@ export default function UploadPage() {
   }
 
   const handleDownload = async (doc: DocumentRow) => {
-    const { data, error } = await supabase.storage.from('documents').download(doc.storage_path)
-    if (error || !data) return
-    const url = URL.createObjectURL(data)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = doc.filename
-    a.click()
-    URL.revokeObjectURL(url)
+    const { data, error } = await supabase.storage
+      .from('documents')
+      .createSignedUrl(doc.storage_path, 60 * 5, { download: doc.filename })
+    if (error || !data) {
+      setErrors([`Could not download ${doc.filename}: ${error?.message ?? 'unknown error'}`])
+      return
+    }
+    window.location.href = data.signedUrl
   }
 
   if (loading) {
@@ -202,17 +205,48 @@ export default function UploadPage() {
               <div className="card-header"><i className="bi bi-folder text-primary-pdao me-1" /> Uploaded documents</div>
               <div className="table-responsive">
                 <table className="table table-hover align-middle">
-                  <thead><tr><th>Type</th><th>Filename</th><th>Uploaded</th><th className="text-end">Action</th></tr></thead>
+                  <thead>
+                    <tr>
+                      <th>Type</th>
+                      <th>Filename</th>
+                      <th>Uploaded</th>
+                      <th>Status</th>
+                      <th className="text-end">Action</th>
+                    </tr>
+                  </thead>
                   <tbody>
                     {documents.length > 0 ? documents.map((d) => (
                       <tr key={d.id}>
-                        <td><span className="badge bg-primary bg-opacity-10 text-primary-pdao">{prettyDocType(d.document_type)}</span></td>
+                        <td>
+                          <span className="badge bg-primary bg-opacity-10 text-primary-pdao">
+                            {prettyDocType(d.document_type)}
+                          </span>
+                        </td>
                         <td><i className="bi bi-file-earmark-text me-1" />{d.filename}</td>
                         <td className="text-muted small">{fmtDateTime(d.uploaded_at)}</td>
-                        <td className="text-end"><button className="btn btn-sm btn-soft" onClick={() => handleDownload(d)}><i className="bi bi-download" /></button></td>
+                        <td>
+                          <span className={`badge ${docStatusBadge(d.status)}`}>
+                            {DOC_STATUS_LABEL[d.status as DocumentStatus] ?? 'Pending review'}
+                          </span>
+                          {d.status === 'rejected' && d.review_remarks && (
+                            <div className="small text-danger mt-1">
+                              <i className="bi bi-info-circle me-1" />
+                              {d.review_remarks}
+                            </div>
+                          )}
+                        </td>
+                        <td className="text-end">
+                          <button className="btn btn-sm btn-soft" onClick={() => handleDownload(d)}>
+                            <i className="bi bi-download" />
+                          </button>
+                        </td>
                       </tr>
                     )) : (
-                      <tr><td colSpan={4} className="text-center text-muted py-4">No documents uploaded yet.</td></tr>
+                      <tr>
+                        <td colSpan={5} className="text-center text-muted py-4">
+                          No documents uploaded yet.
+                        </td>
+                      </tr>
                     )}
                   </tbody>
                 </table>
