@@ -299,6 +299,12 @@ export interface ApplicationInput {
   physician_license_no?: string
 }
 
+// ============================================================
+// Document review workflow
+// ============================================================
+
+export type DocumentStatus = 'pending' | 'approved' | 'rejected'
+
 export interface DocumentRow {
   id: string
   application_id: string
@@ -306,7 +312,27 @@ export interface DocumentRow {
   filename: string
   storage_path: string
   uploaded_at: string
+  status: DocumentStatus
+  reviewed_by: string | null
+  reviewed_at: string | null
+  review_remarks: string | null
 }
+
+export const DOC_STATUS_LABEL: Record<DocumentStatus, string> = {
+  pending: 'Pending review',
+  approved: 'Approved',
+  rejected: 'Rejected',
+}
+
+export function docStatusBadge(status: DocumentStatus | undefined): string {
+  switch (status) {
+    case 'approved': return 'bg-success'
+    case 'rejected': return 'bg-danger'
+    default:         return 'bg-secondary'
+  }
+}
+
+// ============================================================
 
 export interface Announcement {
   id: string
