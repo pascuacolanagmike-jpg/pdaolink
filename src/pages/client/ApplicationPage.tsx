@@ -12,6 +12,82 @@ import {
 } from '../../lib/types'
 import Alert from '../../components/Alert'
 
+// ─────────────────────────────────────────────────────────
+// Assistance tree (Section 22)
+// ─────────────────────────────────────────────────────────
+interface AssistanceNode {
+  key: string
+  label: string
+  children?: AssistanceNode[]
+}
+
+const ASSISTANCE_TREE: AssistanceNode[] = [
+  {
+    key: 'assistive_devices',
+    label: 'Assistive Devices',
+    children: [
+      { key: 'wheelchair', label: 'Wheelchair' },
+      { key: 'crutches', label: 'Crutches' },
+      { key: 'quad_cane', label: 'Quad Cane' },
+      { key: 'single_cane', label: 'Single Cane' },
+      { key: 'walker', label: 'Walker' },
+      { key: 'stroller', label: 'Stroller' },
+      { key: 'hearing_aid', label: 'Hearing Aid' },
+      { key: 'prosthesis', label: 'Prosthesis (Artificial Leg)' },
+      { key: 'external_leg_brace', label: 'External Leg Brace' },
+    ],
+  },
+  {
+    key: 'financial_assistance',
+    label: 'Financial Assistance',
+    children: [
+      { key: 'hospitalization', label: 'Hospitalization' },
+      { key: 'dialysis_chemo', label: 'Dialysis/Chemotherapy' },
+      { key: 'reset_medical', label: 'Reset/Medical' },
+      {
+        key: 'therapy',
+        label: 'Therapy',
+        children: [
+          { key: 'therapy_speech', label: 'Speech' },
+          { key: 'therapy_occupational', label: 'Occupational' },
+          { key: 'therapy_physical', label: 'Physical' },
+        ],
+      },
+    ],
+  },
+  { key: 'neuro_dev_assessment', label: 'Neuro-Developmental Assessment' },
+  {
+    key: 'educational',
+    label: 'Educational',
+    children: [
+      { key: 'tuition_subsidy', label: 'Tuition Subsidy' },
+      { key: 'allowance', label: 'Allowance' },
+      { key: 'materials_supplies', label: 'Materials/Supplies' },
+    ],
+  },
+  { key: 'urgent_basic_needs', label: 'Urgent Basic Needs' },
+  { key: 'burial', label: 'Burial' },
+  {
+    key: 'job_search',
+    label: 'Financial Assistance for Job Searching',
+    children: [
+      { key: 'livelihood', label: 'Livelihood' },
+      { key: 'training', label: 'Training (Social/Vocational)' },
+      {
+        key: 'rehabilitation',
+        label: 'Rehabilitation',
+        children: [
+          { key: 'rehab_community', label: 'Community-based' },
+          { key: 'rehab_institution', label: 'Institution-based' },
+          { key: 'rehab_none', label: 'None' },
+        ],
+      },
+      { key: 'job_placement', label: 'Job Placement' },
+      { key: 'assistance_others', label: 'Others' },
+    ],
+  },
+]
+
 const EMPTY: ApplicationInput = {
   application_type: 'New Applicant',
   pwd_number: '', date_applied: '',
@@ -35,30 +111,31 @@ const EMPTY: ApplicationInput = {
   pwd_id_number: '', philsys_id: '', other_gov_id_type: '', other_gov_id_number: '',
   accomplished_by: 'Applicant', accomplished_last_name: '', accomplished_first_name: '', accomplished_middle_name: '',
   physician_name: '', physician_license_no: '',
+  assistance_received: [], assistance_needed: [],
 }
 
-// Helper to convert Application (DB record) to ApplicationInput (form state)
 function toApplicationInput(app: Application): ApplicationInput {
   const result: any = { ...EMPTY }
   for (const key of Object.keys(EMPTY) as (keyof ApplicationInput)[]) {
     const value = (app as any)[key]
     if (value !== null && value !== undefined) {
-      if (Array.isArray(value)) {
-        result[key] = value
-      } else if (typeof value === 'string') {
-        result[key] = value
-      } else {
-        // in case there are other types (e.g., number, boolean) – keep as is
-        result[key] = value
-      }
+      if (Array.isArray(value)) result[key] = value
+      else if (typeof value === 'string') result[key] = value
+      else result[key] = value
     }
   }
   return result
 }
 
-// 'Needs Revision' is intentionally excluded so clients can re-edit and resubmit
 const ACTIVE_STATUSES = ['Pending', 'Under Review', 'Approved', 'Ready for Pickup']
 const REVISION_STATUS = 'Needs Revision'
+
+type ArrayField =
+  | 'disability_types'
+  | 'disability_cause_congenital'
+  | 'disability_cause_acquired'
+  | 'assistance_received'
+  | 'assistance_needed'
 
 export default function ApplicationPage() {
   const { profile } = useAuth()
@@ -88,7 +165,6 @@ export default function ApplicationPage() {
       .then(({ data }) => {
         const app = data as Application | null
         setExisting(app)
-        // Pre-fill form if application needs revision so client can edit and resubmit
         if (app && app.status === REVISION_STATUS) {
           setForm(toApplicationInput(app))
           if (app.disability_types && Array.isArray(app.disability_types)) {
@@ -103,9 +179,9 @@ export default function ApplicationPage() {
     setForm((f) => ({ ...f, [field]: value }))
   }
 
-  const toggleArray = (field: 'disability_types' | 'disability_cause_congenital' | 'disability_cause_acquired', value: string) => {
+  const toggleArray = (field: ArrayField, value: string) => {
     setForm((f) => {
-      const arr = f[field] ?? []
+      const arr = (f[field] as string[] | undefined) ?? []
       const next = arr.includes(value) ? arr.filter((v) => v !== value) : [...arr, value]
       if (field === 'disability_types') setShowOtherDisability(next.includes('Other Disability'))
       return { ...f, [field]: next }
@@ -135,7 +211,6 @@ export default function ApplicationPage() {
 
     let appId: string
     if (isRevision && existing) {
-      // UPDATE the existing application and reset status to Pending
       const { error } = await supabase
         .from('applications')
         .update({ ...form, status: 'Pending', remarks: '', last_updated: new Date().toISOString() })
@@ -144,7 +219,6 @@ export default function ApplicationPage() {
       if (error) { setError(error.message); return }
       appId = existing.id
     } else {
-      // INSERT new application
       const { data, error } = await supabase.from('applications').insert(form).select().single()
       setSubmitting(false)
       if (error) { setError(error.message); return }
@@ -219,7 +293,6 @@ export default function ApplicationPage() {
             </div>
           )}
           <form onSubmit={handleSubmit} noValidate>
-            {/* Section 1-3 */}
             <FormCard icon="bi-clipboard-check" title="Application Details">
               <div className="row g-3">
                 <FormCol md={4} label="Application type" required>
@@ -236,7 +309,6 @@ export default function ApplicationPage() {
               </div>
             </FormCard>
 
-            {/* Section 4-5: Name */}
             <FormCard icon="bi-person-vcard" title="Name of PWD">
               <div className="row g-3">
                 <FormCol md={3} label="Last name" required>
@@ -254,7 +326,6 @@ export default function ApplicationPage() {
               </div>
             </FormCard>
 
-            {/* Section 6: Date of birth & sex */}
             <FormCard icon="bi-calendar-heart" title="Date of Birth & Sex">
               <div className="row g-3">
                 <FormCol md={4} label="Date of birth" required>
@@ -281,7 +352,6 @@ export default function ApplicationPage() {
               </div>
             </FormCard>
 
-            {/* Section 7: Address */}
             <FormCard icon="bi-geo-alt" title="Address">
               <div className="row g-3">
                 <FormCol md={12} label="House no./Street/Barangay" required>
@@ -302,7 +372,6 @@ export default function ApplicationPage() {
               </div>
             </FormCard>
 
-            {/* Section 8: Type of Disability */}
             <FormCard icon="bi-heart-pulse" title="Type of Disability" subtitle="Check all that apply">
               <div className="row g-2">
                 {DISABILITY_TYPES.map((d) => (
@@ -322,7 +391,6 @@ export default function ApplicationPage() {
               )}
             </FormCard>
 
-            {/* Section 9: Cause of Disability */}
             <FormCard icon="bi-clipboard2-pulse" title="Cause of Disability">
               <div className="row g-3 mb-2">
                 <div className="col-md-6">
@@ -375,7 +443,6 @@ export default function ApplicationPage() {
               )}
             </FormCard>
 
-            {/* Section 10: Educational Attainment */}
             <FormCard icon="bi-book" title="Educational Attainment">
               <div className="row g-3">
                 <FormCol md={6} label="Highest educational attainment">
@@ -387,7 +454,6 @@ export default function ApplicationPage() {
               </div>
             </FormCard>
 
-            {/* Section 11: Employment Status */}
             <FormCard icon="bi-briefcase" title="Employment Status">
               <div className="row g-3">
                 <FormCol md={4} label="Employment status">
@@ -415,7 +481,6 @@ export default function ApplicationPage() {
               </div>
             </FormCard>
 
-            {/* Section 12: Occupation Category */}
             <FormCard icon="bi-people" title="Occupation Category">
               <div className="row g-3">
                 <FormCol md={8} label="Occupation category">
@@ -430,7 +495,6 @@ export default function ApplicationPage() {
               </div>
             </FormCard>
 
-            {/* Section 13: Organization Affiliated */}
             <FormCard icon="bi-building" title="Organization Affiliated With" subtitle="If applicable">
               <div className="row g-3">
                 <FormCol md={6} label="Organization name">
@@ -448,7 +512,6 @@ export default function ApplicationPage() {
               </div>
             </FormCard>
 
-            {/* Section 14: ID Reference Numbers */}
             <FormCard icon="bi-credit-card-2-front" title="ID Reference Numbers" subtitle="Fill in what you have">
               <div className="row g-3">
                 <FormCol md={3} label="SSS No."><input className="form-control" value={form.sss_no ?? ''} onChange={(e) => set('sss_no', e.target.value)} /></FormCol>
@@ -459,7 +522,6 @@ export default function ApplicationPage() {
               </div>
             </FormCard>
 
-            {/* Section 15: Contact details */}
             <FormCard icon="bi-telephone" title="Contact Details">
               <div className="row g-3">
                 <FormCol md={3} label="Landline No."><input type="tel" className="form-control" value={form.landline_no ?? ''} onChange={(e) => set('landline_no', e.target.value)} /></FormCol>
@@ -468,7 +530,6 @@ export default function ApplicationPage() {
               </div>
             </FormCard>
 
-            {/* Section 16: Family Background */}
             <FormCard icon="bi-people-fill" title="Family Background">
               <div className="row g-3">
                 <div className="col-12"><p className="form-subgroup-label">Father's Name</p></div>
@@ -486,7 +547,6 @@ export default function ApplicationPage() {
               </div>
             </FormCard>
 
-            {/* Section 17: Emergency Contact */}
             <FormCard icon="bi-telephone-plus" title="Emergency Contact Information">
               <div className="row g-3">
                 <FormCol md={4} label="Name"><input className="form-control" value={form.emergency_name ?? ''} onChange={(e) => set('emergency_name', e.target.value)} /></FormCol>
@@ -496,7 +556,6 @@ export default function ApplicationPage() {
               </div>
             </FormCard>
 
-            {/* Section 18: Representative */}
             <FormCard icon="bi-person-badge" title="Representative Information" subtitle="Complete only if the applicant is a minor or unable to apply themselves">
               <div className="row g-3">
                 <FormCol md={4} label="Name"><input className="form-control" value={form.representative_name ?? ''} onChange={(e) => set('representative_name', e.target.value)} /></FormCol>
@@ -505,7 +564,6 @@ export default function ApplicationPage() {
               </div>
             </FormCard>
 
-            {/* Section 19: Government IDs */}
             <FormCard icon="bi-card-checklist" title="Government ID Numbers" subtitle="Provide any government-issued ID">
               <div className="row g-3">
                 <FormCol md={4} label="PWD ID No. (if any)"><input className="form-control" value={form.pwd_id_number ?? ''} onChange={(e) => set('pwd_id_number', e.target.value)} /></FormCol>
@@ -515,7 +573,6 @@ export default function ApplicationPage() {
               </div>
             </FormCard>
 
-            {/* Section 20: Accomplished By */}
             <FormCard icon="bi-pen" title="Accomplished By">
               <div className="row g-3">
                 <FormCol md={4} label="Accomplished by">
@@ -529,11 +586,63 @@ export default function ApplicationPage() {
               </div>
             </FormCard>
 
-            {/* Section 21: Certifying Physician */}
             <FormCard icon="bi-person-doctor" title="Certifying Physician">
               <div className="row g-3">
                 <FormCol md={8} label="Physician's name"><input className="form-control" value={form.physician_name ?? ''} onChange={(e) => set('physician_name', e.target.value)} /></FormCol>
                 <FormCol md={4} label="License No."><input className="form-control" value={form.physician_license_no ?? ''} onChange={(e) => set('physician_license_no', e.target.value)} /></FormCol>
+              </div>
+            </FormCard>
+
+            {/* ───────── Section 22: Assistance Received / Needed ───────── */}
+            <FormCard
+              icon="bi-clipboard2-heart"
+              title="Assistance Received / Needed / Rehabilitation"
+              subtitle="Check all that apply under each column"
+            >
+              <div className="row g-4">
+                <div className="col-md-6">
+                  <h6 className="form-subgroup-label mb-3">Received</h6>
+                  <div className="assistance-source mb-3">
+                    <span className="text-muted small me-2">Source:</span>
+                    <CheckboxRow
+                      label="Gov't"
+                      checked={form.assistance_received?.includes('govt') ?? false}
+                      onChange={() => toggleArray('assistance_received', 'govt')}
+                    />
+                    <CheckboxRow
+                      label="NGO"
+                      checked={form.assistance_received?.includes('ngo') ?? false}
+                      onChange={() => toggleArray('assistance_received', 'ngo')}
+                    />
+                  </div>
+                  <AssistanceTree
+                    nodes={ASSISTANCE_TREE}
+                    values={form.assistance_received ?? []}
+                    onToggle={(k) => toggleArray('assistance_received', k)}
+                  />
+                </div>
+
+                <div className="col-md-6">
+                  <h6 className="form-subgroup-label mb-3">Needed</h6>
+                  <div className="assistance-source mb-3">
+                    <span className="text-muted small me-2">Source:</span>
+                    <CheckboxRow
+                      label="Gov't"
+                      checked={form.assistance_needed?.includes('govt') ?? false}
+                      onChange={() => toggleArray('assistance_needed', 'govt')}
+                    />
+                    <CheckboxRow
+                      label="NGO"
+                      checked={form.assistance_needed?.includes('ngo') ?? false}
+                      onChange={() => toggleArray('assistance_needed', 'ngo')}
+                    />
+                  </div>
+                  <AssistanceTree
+                    nodes={ASSISTANCE_TREE}
+                    values={form.assistance_needed ?? []}
+                    onToggle={(k) => toggleArray('assistance_needed', k)}
+                  />
+                </div>
               </div>
             </FormCard>
 
@@ -566,14 +675,15 @@ export default function ApplicationPage() {
         .form-official-subtitle { font-size: 0.82rem; opacity: 0.8; margin-bottom: 0; }
         .form-subgroup-label { font-weight: 700; font-size: 0.85rem; color: #0056b3; margin-bottom: 0.2rem; text-transform: uppercase; letter-spacing: 0.5px; }
         .checkbox-row {
-          display: flex; align-items: center; gap: 0.5rem;
-          padding: 0.5rem 0.7rem; border-radius: 0.4rem; cursor: pointer;
+          display: inline-flex; align-items: center; gap: 0.5rem;
+          padding: 0.4rem 0.65rem; border-radius: 0.4rem; cursor: pointer;
           border: 1px solid #e4e9f0; transition: all 0.15s ease;
-          background: #fff; font-size: 0.88rem;
+          background: #fff; font-size: 0.85rem; margin-right: 0.4rem; margin-bottom: 0.35rem;
         }
         .checkbox-row:hover { border-color: #b8d4f0; background: #f5f9ff; }
         .checkbox-row.checked { border-color: #0056b3; background: rgba(0, 86, 179, 0.06); }
         .checkbox-row input { width: 16px; height: 16px; cursor: pointer; margin: 0; }
+        .assistance-source .checkbox-row { display: inline-flex; }
       `}</style>
     </AppLayout>
   )
@@ -606,5 +716,39 @@ function CheckboxRow({ label, checked, onChange, radio }: { label: string; check
       <input type={radio ? 'radio' : 'checkbox'} checked={checked} onChange={onChange} />
       <span>{label}</span>
     </label>
+  )
+}
+
+function AssistanceTree({
+  nodes,
+  values,
+  onToggle,
+  depth = 0,
+}: {
+  nodes: AssistanceNode[]
+  values: string[]
+  onToggle: (key: string) => void
+  depth?: number
+}) {
+  return (
+    <div className={depth > 0 ? 'ms-3 mt-1' : ''}>
+      {nodes.map((node) => (
+        <div key={node.key} className="mb-1">
+          <CheckboxRow
+            label={node.label}
+            checked={values.includes(node.key)}
+            onChange={() => onToggle(node.key)}
+          />
+          {node.children && (
+            <AssistanceTree
+              nodes={node.children}
+              values={values}
+              onToggle={onToggle}
+              depth={depth + 1}
+            />
+          )}
+        </div>
+      ))}
+    </div>
   )
 }
