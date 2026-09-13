@@ -51,7 +51,7 @@ export default function RegisterPage() {
               <div className="text-center mb-4">
                 {/* Logo image */}
                 <img
-                  src="https://cdn.postimage.me/2026/09/04/ce3cc890-fba2-4622-b7f4-8d05cfa7a8d5.jpeg"
+                  src="https://cdn.postimage.me/2026/09/13/cropped_circle_image-1.png"
                   alt="PDAOLink Logo"
                   className="d-block mx-auto mb-3"
                   style={{
