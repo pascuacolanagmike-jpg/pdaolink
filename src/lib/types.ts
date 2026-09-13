@@ -298,6 +298,8 @@ export interface ApplicationInput {
   accomplished_first_name?: string
   accomplished_middle_name?: string
   physician_name?: string
+  assistance_received?: string[]
+  assistance_needed?: string[]
   physician_license_no?: string
 }
 
