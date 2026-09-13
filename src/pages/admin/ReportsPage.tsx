@@ -74,9 +74,24 @@ export default function ReportsPage() {
     })()
   }, [])
 
-  const doExport = (scope: string, format: 'pdf' | 'excel') => {
-    const filtered = filterByScope(apps, scope)
-    const filename = `pdaolink-${scope}-report.${format === 'pdf' ? 'pdf' : 'xlsx'}`
+  // Counts for gender stats
+  const maleCount = apps.filter((a) => a.gender === 'Male').length
+  const femaleCount = apps.filter((a) => a.gender === 'Female').length
+
+  // Scope export (with optional gender)
+  const doExport = (scope: string, format: 'pdf' | 'excel', gender?: 'Male' | 'Female') => {
+    let filtered = filterByScope(apps, scope)
+    if (gender) filtered = filtered.filter((a) => a.gender === gender)
+    const suffix = gender ? `-${gender.toLowerCase()}` : ''
+    const filename = `pdaolink-${scope}${suffix}-report.${format === 'pdf' ? 'pdf' : 'xlsx'}`
+    if (format === 'pdf') exportPDF(filtered, stats, filename)
+    else exportExcel(filtered, filename)
+  }
+
+  // Gender-only export (all applications of that gender)
+  const doGenderExport = (gender: 'Male' | 'Female', format: 'pdf' | 'excel') => {
+    const filtered = apps.filter((a) => a.gender === gender)
+    const filename = `pdaolink-${gender.toLowerCase()}-report.${format === 'pdf' ? 'pdf' : 'xlsx'}`
     if (format === 'pdf') exportPDF(filtered, stats, filename)
     else exportExcel(filtered, filename)
   }
@@ -185,6 +200,80 @@ export default function ReportsPage() {
           </div>
         </div>
 
+        {/* ─── Export by gender ─── */}
+        <div className="card border-0 shadow-sm mb-4">
+          <div className="card-header">
+            <i className="bi bi-gender-ambiguous text-primary-pdao me-1" /> Export by gender
+          </div>
+          <div className="card-body">
+            <div className="row g-3">
+              <div className="col-md-4">
+                <div className="card h-100 border">
+                  <div className="card-body">
+                    <h6>
+                      <i className="bi bi-people-fill text-primary-pdao me-1" /> Overall (All)
+                    </h6>
+                    <p className="text-muted small mb-3">
+                      Both male and female applicants.
+                      <br />
+                      <strong>{stats.total}</strong> total
+                    </p>
+                    <button className="btn btn-sm btn-primary me-1" onClick={() => doExport('all', 'pdf')}>
+                      <i className="bi bi-file-pdf me-1" />PDF
+                    </button>
+                    <button className="btn btn-sm btn-soft" onClick={() => doExport('all', 'excel')}>
+                      <i className="bi bi-file-earmark-spreadsheet me-1" />Excel
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="col-md-4">
+                <div className="card h-100 border">
+                  <div className="card-body">
+                    <h6>
+                      <i className="bi bi-gender-male text-primary me-1" /> Male applicants
+                    </h6>
+                    <p className="text-muted small mb-3">
+                      All male applicants.
+                      <br />
+                      <strong>{maleCount}</strong> total
+                    </p>
+                    <button className="btn btn-sm btn-primary me-1" onClick={() => doGenderExport('Male', 'pdf')} disabled={maleCount === 0}>
+                      <i className="bi bi-file-pdf me-1" />PDF
+                    </button>
+                    <button className="btn btn-sm btn-soft" onClick={() => doGenderExport('Male', 'excel')} disabled={maleCount === 0}>
+                      <i className="bi bi-file-earmark-spreadsheet me-1" />Excel
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="col-md-4">
+                <div className="card h-100 border">
+                  <div className="card-body">
+                    <h6>
+                      <i className="bi bi-gender-female text-danger me-1" /> Female applicants
+                    </h6>
+                    <p className="text-muted small mb-3">
+                      All female applicants.
+                      <br />
+                      <strong>{femaleCount}</strong> total
+                    </p>
+                    <button className="btn btn-sm btn-primary me-1" onClick={() => doGenderExport('Female', 'pdf')} disabled={femaleCount === 0}>
+                      <i className="bi bi-file-pdf me-1" />PDF
+                    </button>
+                    <button className="btn btn-sm btn-soft" onClick={() => doGenderExport('Female', 'excel')} disabled={femaleCount === 0}>
+                      <i className="bi bi-file-earmark-spreadsheet me-1" />Excel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ─── Export reports (status/time based) ─── */}
         <div className="card border-0 shadow-sm">
           <div className="card-header">
             <i className="bi bi-download text-primary-pdao me-1" /> Export reports
@@ -192,13 +281,12 @@ export default function ReportsPage() {
           <div className="card-body">
             <div className="row g-3">
               {[
-                { scope: 'all', title: 'All applications', desc: 'Full list of submitted applications.' },
                 { scope: 'daily', title: 'Daily applications', desc: 'Applications submitted today.' },
                 { scope: 'monthly', title: 'Monthly applications', desc: 'Applications submitted this month.' },
                 { scope: 'approved', title: 'Approved applications', desc: 'All approved PWD applications.' },
                 { scope: 'rejected', title: 'Rejected applications', desc: 'All rejected applications.' },
               ].map((r) => (
-                <div className="col-md-6 col-xl-4" key={r.scope}>
+                <div className="col-md-6 col-xl-3" key={r.scope}>
                   <div className="card h-100 border">
                     <div className="card-body">
                       <h6>{r.title}</h6>
