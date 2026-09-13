@@ -6,6 +6,8 @@ import { useAuth } from '../../lib/auth'
 import { supabase } from '../../lib/supabase'
 import {
   statusColor,
+  docStatusBadge,         
+  DOC_STATUS_LABEL,
   fmtDate,
   fmtDateTime,
   prettyDocType,
@@ -13,6 +15,7 @@ import {
   type Application,
   type StatusLog,
   type DocumentRow,
+  type DocumentStatus, 
 } from '../../lib/types'
 import { exportApplicationFormPDF } from '../../lib/formExport'
 import Alert from '../../components/Alert'
