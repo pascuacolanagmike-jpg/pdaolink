@@ -263,7 +263,7 @@ export default function EidCard({ application, photoUrl, flipped, onFlip }: EidC
           {/* ═══════════════ BACK ═══════════════ */}
           <div className="eid-face eid-back-face">
             <img
-              src="https://cdn.postimage.me/2026/09/13/Untitled-design-3.png"
+              src="https://cdn.postimage.me/2026/09/13/849d1475-9ccb-4eae-811a-06546c6317c0.jpeg"
               alt=""
               className="eid-bg"
             />
