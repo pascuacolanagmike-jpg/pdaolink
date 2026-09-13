@@ -4,8 +4,15 @@ import 'chart.js/auto'
 import AppLayout from '../../components/AppLayout'
 import { ADMIN_NAV } from '../../lib/nav'
 import { supabase } from '../../lib/supabase'
-import { ALL_STATUSES, DISABILITY_TYPES, statusColor, type Application } from '../../lib/types'
-import { exportExcel, exportPDF, filterByScope, groupByAddress, exportAddressExcel, exportAddressPDF, type AddressGroup } from '../../lib/reportExport'
+import {
+  ALL_STATUSES, DISABILITY_TYPES, GENDER_OPTIONS,
+  statusColor, appFullName, fmtDate,
+  type Application,
+} from '../../lib/types'
+import {
+  exportExcel, exportPDF, filterByScope, groupByAddress,
+  exportAddressExcel, exportAddressPDF, type AddressGroup,
+} from '../../lib/reportExport'
 
 interface Stats {
   total: number
@@ -18,16 +25,19 @@ interface Stats {
 
 export default function ReportsPage() {
   const [apps, setApps] = useState<Application[]>([])
-  const [stats, setStats] = useState<Stats>({ total: 0, byStatus: {}, daily: 0, monthly: 0, clients: 0, disabilityBreakdown: {} })
+  const [stats, setStats] = useState<Stats>({
+    total: 0, byStatus: {}, daily: 0, monthly: 0, clients: 0, disabilityBreakdown: {},
+  })
   const [loading, setLoading] = useState(true)
   const statusRef = useRef<any>(null)
   const disabilityRef = useRef<any>(null)
   const [addressGroups, setAddressGroups] = useState<AddressGroup[]>([])
   const [addrSearch, setAddrSearch] = useState('')
 
-  // New filter states
+  // Filter states
   const [addrFilter, setAddrFilter] = useState('')
   const [disabilityFilter, setDisabilityFilter] = useState('')
+  const [genderFilter, setGenderFilter] = useState('')
   const [nameSearch, setNameSearch] = useState('')
 
   useEffect(() => {
@@ -52,7 +62,14 @@ export default function ReportsPage() {
       })
       setApps(rows)
       setAddressGroups(groupByAddress(rows))
-      setStats({ total: rows.length, byStatus, daily: daily.count ?? 0, monthly: monthly.count ?? 0, clients: clients.count ?? 0, disabilityBreakdown })
+      setStats({
+        total: rows.length,
+        byStatus,
+        daily: daily.count ?? 0,
+        monthly: monthly.count ?? 0,
+        clients: clients.count ?? 0,
+        disabilityBreakdown,
+      })
       setLoading(false)
     })()
   }, [])
@@ -66,33 +83,57 @@ export default function ReportsPage() {
 
   const statusBars = {
     labels: ALL_STATUSES,
-    datasets: [{ label: 'Applications', data: ALL_STATUSES.map((s) => stats.byStatus[s] ?? 0), backgroundColor: '#0056b3', borderRadius: 6 }],
+    datasets: [{
+      label: 'Applications',
+      data: ALL_STATUSES.map((s) => stats.byStatus[s] ?? 0),
+      backgroundColor: '#0056b3',
+      borderRadius: 6,
+    }],
   }
 
   const validDisabilities = Object.entries(stats.disabilityBreakdown).filter(([, v]) => v > 0)
   const disabilityPie = {
     labels: validDisabilities.map(([k]) => k),
-    datasets: [{ data: validDisabilities.map(([, v]) => v), backgroundColor: ['#0056b3', '#0d6efd', '#0a9396', '#198754', '#f59e0b', '#dc3545', '#6f42c1', '#20c997', '#fd7e14', '#adb5bd'] }],
+    datasets: [{
+      data: validDisabilities.map(([, v]) => v),
+      backgroundColor: ['#0056b3', '#0d6efd', '#0a9396', '#198754', '#f59e0b', '#dc3545', '#6f42c1', '#20c997', '#fd7e14', '#adb5bd'],
+    }],
   }
 
-  // Filter raw apps using type assertion to access name and address
+  // Filter applicants
   const filteredApplicants = apps.filter((app) => {
-    const a = app as any; // cast to any to bypass TypeScript errors
-    const matchAddress = addrFilter.trim() === '' || (a.address && a.address.toLowerCase().includes(addrFilter.toLowerCase()));
-    const matchDisability = disabilityFilter === '' || a.disability_type === disabilityFilter;
-    const matchName = nameSearch.trim() === '' || (a.name && a.name.toLowerCase().includes(nameSearch.toLowerCase()));
-    return matchAddress && matchDisability && matchName;
-  });
+    const fullName = appFullName(app).toLowerCase()
+    const addrParts = [
+      app.address, app.barangay, app.municipality, app.province,
+    ].filter(Boolean).join(' ').toLowerCase()
+
+    const matchAddress = addrFilter.trim() === '' || addrParts.includes(addrFilter.toLowerCase())
+    const matchDisability = disabilityFilter === '' || app.disability_type === disabilityFilter
+    const matchGender = genderFilter === '' || app.gender === genderFilter
+    const matchName = nameSearch.trim() === '' || fullName.includes(nameSearch.toLowerCase())
+
+    return matchAddress && matchDisability && matchGender && matchName
+  })
 
   const exportFiltered = (format: 'pdf' | 'excel') => {
     const filename = `pdaolink-filtered-report.${format === 'pdf' ? 'pdf' : 'xlsx'}`
-    // Pass the filtered applications as any[] to export functions
     if (format === 'pdf') exportPDF(filteredApplicants as any, stats, filename)
     else exportExcel(filteredApplicants as any, filename)
   }
 
+  const clearFilters = () => {
+    setAddrFilter('')
+    setDisabilityFilter('')
+    setGenderFilter('')
+    setNameSearch('')
+  }
+
   if (loading) {
-    return <AppLayout navItems={ADMIN_NAV}><div className="text-center py-5"><div className="spinner-border text-primary" /></div></AppLayout>
+    return (
+      <AppLayout navItems={ADMIN_NAV}>
+        <div className="text-center py-5"><div className="spinner-border text-primary" /></div>
+      </AppLayout>
+    )
   }
 
   return (
@@ -113,20 +154,41 @@ export default function ReportsPage() {
         <div className="row g-3 mb-4">
           <div className="col-lg-6">
             <div className="card border-0 shadow-sm h-100">
-              <div className="card-header"><i className="bi bi-bar-chart text-primary-pdao me-1" /> Applications by status</div>
-              <div className="card-body"><div className="chart-wrap"><Bar ref={statusRef} data={statusBars} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }} /></div></div>
+              <div className="card-header">
+                <i className="bi bi-bar-chart text-primary-pdao me-1" /> Applications by status
+              </div>
+              <div className="card-body">
+                <div className="chart-wrap">
+                  <Bar ref={statusRef} data={statusBars} options={{
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+                  }} />
+                </div>
+              </div>
             </div>
           </div>
           <div className="col-lg-6">
             <div className="card border-0 shadow-sm h-100">
-              <div className="card-header"><i className="bi bi-pie-chart text-primary-pdao me-1" /> By disability type</div>
-              <div className="card-body"><div className="chart-wrap"><Pie ref={disabilityRef} data={disabilityPie} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { boxWidth: 12 } } } }} /></div></div>
+              <div className="card-header">
+                <i className="bi bi-pie-chart text-primary-pdao me-1" /> By disability type
+              </div>
+              <div className="card-body">
+                <div className="chart-wrap">
+                  <Pie ref={disabilityRef} data={disabilityPie} options={{
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { position: 'right', labels: { boxWidth: 12 } } },
+                  }} />
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
         <div className="card border-0 shadow-sm">
-          <div className="card-header"><i className="bi bi-download text-primary-pdao me-1" /> Export reports</div>
+          <div className="card-header">
+            <i className="bi bi-download text-primary-pdao me-1" /> Export reports
+          </div>
           <div className="card-body">
             <div className="row g-3">
               {[
@@ -141,8 +203,12 @@ export default function ReportsPage() {
                     <div className="card-body">
                       <h6>{r.title}</h6>
                       <p className="text-muted small mb-3">{r.desc}</p>
-                      <button className="btn btn-sm btn-primary me-1" onClick={() => doExport(r.scope, 'pdf')}><i className="bi bi-file-pdf me-1" />PDF</button>
-                      <button className="btn btn-sm btn-soft" onClick={() => doExport(r.scope, 'excel')}><i className="bi bi-file-earmark-spreadsheet me-1" />Excel</button>
+                      <button className="btn btn-sm btn-primary me-1" onClick={() => doExport(r.scope, 'pdf')}>
+                        <i className="bi bi-file-pdf me-1" />PDF
+                      </button>
+                      <button className="btn btn-sm btn-soft" onClick={() => doExport(r.scope, 'excel')}>
+                        <i className="bi bi-file-earmark-spreadsheet me-1" />Excel
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -154,19 +220,45 @@ export default function ReportsPage() {
         {/* Search Applicants Section */}
         <div className="card border-0 shadow-sm mt-4">
           <div className="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
-            <span><i className="bi bi-search text-primary-pdao me-1" /> Search Applicants</span>
+            <span>
+              <i className="bi bi-search text-primary-pdao me-1" /> Search Applicants
+              <span className="badge bg-primary bg-opacity-10 text-primary-pdao ms-2">
+                {filteredApplicants.length} result{filteredApplicants.length !== 1 ? 's' : ''}
+              </span>
+            </span>
             <div className="d-flex gap-2">
-              <button className="btn btn-sm btn-primary" onClick={() => exportFiltered('pdf')} disabled={filteredApplicants.length === 0}>
+              <button className="btn btn-sm btn-outline-secondary" onClick={clearFilters}>
+                <i className="bi bi-x-circle me-1" /> Clear
+              </button>
+              <button
+                className="btn btn-sm btn-primary"
+                onClick={() => exportFiltered('pdf')}
+                disabled={filteredApplicants.length === 0}
+              >
                 <i className="bi bi-file-pdf me-1" />PDF
               </button>
-              <button className="btn btn-sm btn-soft" onClick={() => exportFiltered('excel')} disabled={filteredApplicants.length === 0}>
+              <button
+                className="btn btn-sm btn-soft"
+                onClick={() => exportFiltered('excel')}
+                disabled={filteredApplicants.length === 0}
+              >
                 <i className="bi bi-file-earmark-spreadsheet me-1" />Excel
               </button>
             </div>
           </div>
           <div className="card-body">
             <div className="row g-3 mb-3">
-              <div className="col-md-4">
+              <div className="col-md-3">
+                <label className="form-label small text-muted">Name</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Search name…"
+                  value={nameSearch}
+                  onChange={(e) => setNameSearch(e.target.value)}
+                />
+              </div>
+              <div className="col-md-3">
                 <label className="form-label small text-muted">Barangay / Address</label>
                 <input
                   type="text"
@@ -176,7 +268,7 @@ export default function ReportsPage() {
                   onChange={(e) => setAddrFilter(e.target.value)}
                 />
               </div>
-              <div className="col-md-4">
+              <div className="col-md-3">
                 <label className="form-label small text-muted">Disability Type</label>
                 <select
                   className="form-select"
@@ -189,15 +281,18 @@ export default function ReportsPage() {
                   ))}
                 </select>
               </div>
-              <div className="col-md-4">
-                <label className="form-label small text-muted">Name</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="Search name…"
-                  value={nameSearch}
-                  onChange={(e) => setNameSearch(e.target.value)}
-                />
+              <div className="col-md-3">
+                <label className="form-label small text-muted">Gender</label>
+                <select
+                  className="form-select"
+                  value={genderFilter}
+                  onChange={(e) => setGenderFilter(e.target.value)}
+                >
+                  <option value="">All Genders</option>
+                  {GENDER_OPTIONS.map((g) => (
+                    <option key={g} value={g}>{g}</option>
+                  ))}
+                </select>
               </div>
             </div>
 
@@ -207,6 +302,7 @@ export default function ReportsPage() {
                   <thead>
                     <tr>
                       <th>Name</th>
+                      <th>Gender</th>
                       <th>Address</th>
                       <th>Disability</th>
                       <th>Status</th>
@@ -214,17 +310,22 @@ export default function ReportsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredApplicants.map((app, idx) => {
-                      const a = app as any; // cast to any for rendering
+                    {filteredApplicants.map((app) => {
+                      const addr = [app.barangay, app.municipality, app.province].filter(Boolean).join(', ')
                       return (
-                        <tr key={idx}>
-                          <td className="fw-semibold">{a.name}</td>
-                          <td>{a.address}</td>
-                          <td>{a.disability_type || '—'}</td>
-                          <td><span className={`badge status-badge ${statusColor(a.status)}`}>{a.status}</span></td>
-                          <td>{new Date(a.submission_date).toLocaleDateString()}</td>
+                        <tr key={app.id}>
+                          <td className="fw-semibold">{appFullName(app)}</td>
+                          <td>{app.gender || '—'}</td>
+                          <td className="small text-muted">{addr || app.address || '—'}</td>
+                          <td>{app.disability_type || '—'}</td>
+                          <td>
+                            <span className={`badge status-badge ${statusColor(app.status)}`}>
+                              {app.status}
+                            </span>
+                          </td>
+                          <td className="small text-muted">{fmtDate(app.submission_date)}</td>
                         </tr>
-                      );
+                      )
                     })}
                   </tbody>
                 </table>
