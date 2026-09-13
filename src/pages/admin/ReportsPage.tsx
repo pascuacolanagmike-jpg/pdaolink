@@ -6,6 +6,7 @@ import { ADMIN_NAV } from '../../lib/nav'
 import { supabase } from '../../lib/supabase'
 import {
   ALL_STATUSES, DISABILITY_TYPES, GENDER_OPTIONS,
+  CIVIL_STATUS_OPTIONS, EDUCATIONAL_ATTAINMENT, EMPLOYMENT_STATUS,
   statusColor, appFullName, fmtDate,
   type Application,
 } from '../../lib/types'
@@ -13,6 +14,8 @@ import {
   exportExcel, exportPDF, filterByScope, groupByAddress,
   exportAddressExcel, exportAddressPDF, type AddressGroup,
 } from '../../lib/reportExport'
+
+const CAUSE_TYPE_OPTIONS = ['Congenital / Inborn', 'Acquired']
 
 interface Stats {
   total: number
@@ -39,6 +42,11 @@ export default function ReportsPage() {
   const [disabilityFilter, setDisabilityFilter] = useState('')
   const [genderFilter, setGenderFilter] = useState('')
   const [nameSearch, setNameSearch] = useState('')
+  const [causeFilter, setCauseFilter] = useState('')
+  const [employmentFilter, setEmploymentFilter] = useState('')
+  const [civilFilter, setCivilFilter] = useState('')
+  const [educationFilter, setEducationFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
 
   useEffect(() => {
     const now = new Date()
@@ -78,7 +86,7 @@ export default function ReportsPage() {
   const maleCount = apps.filter((a) => a.gender === 'Male').length
   const femaleCount = apps.filter((a) => a.gender === 'Female').length
 
-  // Scope export (with optional gender)
+  // Scope export
   const doExport = (scope: string, format: 'pdf' | 'excel', gender?: 'Male' | 'Female') => {
     let filtered = filterByScope(apps, scope)
     if (gender) filtered = filtered.filter((a) => a.gender === gender)
@@ -88,7 +96,6 @@ export default function ReportsPage() {
     else exportExcel(filtered, filename)
   }
 
-  // Gender-only export (all applications of that gender)
   const doGenderExport = (gender: 'Male' | 'Female', format: 'pdf' | 'excel') => {
     const filtered = apps.filter((a) => a.gender === gender)
     const filename = `pdaolink-${gender.toLowerCase()}-report.${format === 'pdf' ? 'pdf' : 'xlsx'}`
@@ -126,9 +133,29 @@ export default function ReportsPage() {
     const matchDisability = disabilityFilter === '' || app.disability_type === disabilityFilter
     const matchGender = genderFilter === '' || app.gender === genderFilter
     const matchName = nameSearch.trim() === '' || fullName.includes(nameSearch.toLowerCase())
+    const matchCause = causeFilter === '' || app.disability_cause_type === causeFilter
+    const matchEmployment = employmentFilter === '' || app.employment_status === employmentFilter
+    const matchCivil = civilFilter === '' || app.civil_status === civilFilter
+    const matchEducation = educationFilter === '' || app.educational_attainment === educationFilter
+    const matchStatus = statusFilter === '' || app.status === statusFilter
 
-    return matchAddress && matchDisability && matchGender && matchName
+    return (
+      matchAddress && matchDisability && matchGender && matchName &&
+      matchCause && matchEmployment && matchCivil && matchEducation && matchStatus
+    )
   })
+
+  // Counts inside the filtered set (for the summary chips)
+  const filteredCounts = {
+    total: filteredApplicants.length,
+    male: filteredApplicants.filter((a) => a.gender === 'Male').length,
+    female: filteredApplicants.filter((a) => a.gender === 'Female').length,
+    employed: filteredApplicants.filter((a) => a.employment_status === 'Employed').length,
+    unemployed: filteredApplicants.filter((a) => a.employment_status === 'Unemployed').length,
+    selfEmployed: filteredApplicants.filter((a) => a.employment_status === 'Self-employed').length,
+    approved: filteredApplicants.filter((a) => a.status === 'Approved').length,
+    pending: filteredApplicants.filter((a) => a.status === 'Pending').length,
+  }
 
   const exportFiltered = (format: 'pdf' | 'excel') => {
     const filename = `pdaolink-filtered-report.${format === 'pdf' ? 'pdf' : 'xlsx'}`
@@ -141,7 +168,17 @@ export default function ReportsPage() {
     setDisabilityFilter('')
     setGenderFilter('')
     setNameSearch('')
+    setCauseFilter('')
+    setEmploymentFilter('')
+    setCivilFilter('')
+    setEducationFilter('')
+    setStatusFilter('')
   }
+
+  const activeFilterCount = [
+    addrFilter, disabilityFilter, genderFilter, nameSearch,
+    causeFilter, employmentFilter, civilFilter, educationFilter, statusFilter,
+  ].filter((v) => v !== '').length
 
   if (loading) {
     return (
@@ -210,12 +247,9 @@ export default function ReportsPage() {
               <div className="col-md-4">
                 <div className="card h-100 border">
                   <div className="card-body">
-                    <h6>
-                      <i className="bi bi-people-fill text-primary-pdao me-1" /> Overall (All)
-                    </h6>
+                    <h6><i className="bi bi-people-fill text-primary-pdao me-1" /> Overall (All)</h6>
                     <p className="text-muted small mb-3">
-                      Both male and female applicants.
-                      <br />
+                      Both male and female applicants.<br />
                       <strong>{stats.total}</strong> total
                     </p>
                     <button className="btn btn-sm btn-primary me-1" onClick={() => doExport('all', 'pdf')}>
@@ -231,12 +265,9 @@ export default function ReportsPage() {
               <div className="col-md-4">
                 <div className="card h-100 border">
                   <div className="card-body">
-                    <h6>
-                      <i className="bi bi-gender-male text-primary me-1" /> Male applicants
-                    </h6>
+                    <h6><i className="bi bi-gender-male text-primary me-1" /> Male applicants</h6>
                     <p className="text-muted small mb-3">
-                      All male applicants.
-                      <br />
+                      All male applicants.<br />
                       <strong>{maleCount}</strong> total
                     </p>
                     <button className="btn btn-sm btn-primary me-1" onClick={() => doGenderExport('Male', 'pdf')} disabled={maleCount === 0}>
@@ -252,12 +283,9 @@ export default function ReportsPage() {
               <div className="col-md-4">
                 <div className="card h-100 border">
                   <div className="card-body">
-                    <h6>
-                      <i className="bi bi-gender-female text-danger me-1" /> Female applicants
-                    </h6>
+                    <h6><i className="bi bi-gender-female text-danger me-1" /> Female applicants</h6>
                     <p className="text-muted small mb-3">
-                      All female applicants.
-                      <br />
+                      All female applicants.<br />
                       <strong>{femaleCount}</strong> total
                     </p>
                     <button className="btn btn-sm btn-primary me-1" onClick={() => doGenderExport('Female', 'pdf')} disabled={femaleCount === 0}>
@@ -273,7 +301,7 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        {/* ─── Export reports (status/time based) ─── */}
+        {/* ─── Export reports ─── */}
         <div className="card border-0 shadow-sm">
           <div className="card-header">
             <i className="bi bi-download text-primary-pdao me-1" /> Export reports
@@ -305,17 +333,20 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        {/* Search Applicants Section */}
+        {/* ─── Search Applicants Section ─── */}
         <div className="card border-0 shadow-sm mt-4">
           <div className="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
             <span>
               <i className="bi bi-search text-primary-pdao me-1" /> Search Applicants
-              <span className="badge bg-primary bg-opacity-10 text-primary-pdao ms-2">
-                {filteredApplicants.length} result{filteredApplicants.length !== 1 ? 's' : ''}
-              </span>
+              <span className="badge bg-primary ms-2">{filteredApplicants.length} of {apps.length}</span>
+              {activeFilterCount > 0 && (
+                <span className="badge bg-info text-dark ms-2">
+                  {activeFilterCount} filter{activeFilterCount !== 1 ? 's' : ''} active
+                </span>
+              )}
             </span>
             <div className="d-flex gap-2">
-              <button className="btn btn-sm btn-outline-secondary" onClick={clearFilters}>
+              <button className="btn btn-sm btn-outline-secondary" onClick={clearFilters} disabled={activeFilterCount === 0}>
                 <i className="bi bi-x-circle me-1" /> Clear
               </button>
               <button
@@ -335,6 +366,19 @@ export default function ReportsPage() {
             </div>
           </div>
           <div className="card-body">
+
+            {/* ─── Live summary chips ─── */}
+            <div className="summary-chips mb-3">
+              <span className="chip chip-primary"><strong>{filteredCounts.total}</strong> total</span>
+              <span className="chip chip-blue"><i className="bi bi-gender-male me-1" /><strong>{filteredCounts.male}</strong> male</span>
+              <span className="chip chip-pink"><i className="bi bi-gender-female me-1" /><strong>{filteredCounts.female}</strong> female</span>
+              <span className="chip chip-success"><i className="bi bi-check-circle me-1" /><strong>{filteredCounts.approved}</strong> approved</span>
+              <span className="chip chip-warning"><i className="bi bi-hourglass-split me-1" /><strong>{filteredCounts.pending}</strong> pending</span>
+              <span className="chip chip-info"><i className="bi bi-briefcase me-1" /><strong>{filteredCounts.employed}</strong> employed</span>
+              <span className="chip chip-secondary"><i className="bi bi-person-dash me-1" /><strong>{filteredCounts.unemployed}</strong> unemployed</span>
+            </div>
+
+            {/* ─── Filter row 1 ─── */}
             <div className="row g-3 mb-3">
               <div className="col-md-3">
                 <label className="form-label small text-muted">Name</label>
@@ -384,6 +428,79 @@ export default function ReportsPage() {
               </div>
             </div>
 
+            {/* ─── Filter row 2 (NEW) ─── */}
+            <div className="row g-3 mb-3">
+              <div className="col-md-3">
+                <label className="form-label small text-muted">Cause of Disability</label>
+                <select
+                  className="form-select"
+                  value={causeFilter}
+                  onChange={(e) => setCauseFilter(e.target.value)}
+                >
+                  <option value="">All Causes</option>
+                  {CAUSE_TYPE_OPTIONS.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-md-3">
+                <label className="form-label small text-muted">Employment Status</label>
+                <select
+                  className="form-select"
+                  value={employmentFilter}
+                  onChange={(e) => setEmploymentFilter(e.target.value)}
+                >
+                  <option value="">All Employment</option>
+                  {EMPLOYMENT_STATUS.map((e) => (
+                    <option key={e} value={e}>{e}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-md-3">
+                <label className="form-label small text-muted">Civil Status</label>
+                <select
+                  className="form-select"
+                  value={civilFilter}
+                  onChange={(e) => setCivilFilter(e.target.value)}
+                >
+                  <option value="">All Civil Statuses</option>
+                  {CIVIL_STATUS_OPTIONS.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-md-3">
+                <label className="form-label small text-muted">Educational Attainment</label>
+                <select
+                  className="form-select"
+                  value={educationFilter}
+                  onChange={(e) => setEducationFilter(e.target.value)}
+                >
+                  <option value="">All Educational Levels</option>
+                  {EDUCATIONAL_ATTAINMENT.map((ed) => (
+                    <option key={ed} value={ed}>{ed}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* ─── Filter row 3 ─── */}
+            <div className="row g-3 mb-3">
+              <div className="col-md-3">
+                <label className="form-label small text-muted">Application Status</label>
+                <select
+                  className="form-select"
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                >
+                  <option value="">All Statuses</option>
+                  {ALL_STATUSES.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
             {filteredApplicants.length > 0 ? (
               <div className="table-responsive">
                 <table className="table table-hover align-middle">
@@ -393,6 +510,10 @@ export default function ReportsPage() {
                       <th>Gender</th>
                       <th>Address</th>
                       <th>Disability</th>
+                      <th>Cause</th>
+                      <th>Employment</th>
+                      <th>Civil Status</th>
+                      <th>Education</th>
                       <th>Status</th>
                       <th>Submitted</th>
                     </tr>
@@ -405,7 +526,11 @@ export default function ReportsPage() {
                           <td className="fw-semibold">{appFullName(app)}</td>
                           <td>{app.gender || '—'}</td>
                           <td className="small text-muted">{addr || app.address || '—'}</td>
-                          <td>{app.disability_type || '—'}</td>
+                          <td className="small">{app.disability_type || '—'}</td>
+                          <td className="small">{app.disability_cause_type || '—'}</td>
+                          <td className="small">{app.employment_status || '—'}</td>
+                          <td className="small">{app.civil_status || '—'}</td>
+                          <td className="small">{app.educational_attainment || '—'}</td>
                           <td>
                             <span className={`badge status-badge ${statusColor(app.status)}`}>
                               {app.status}
@@ -427,6 +552,24 @@ export default function ReportsPage() {
           </div>
         </div>
       </div>
+
+      <style>{`
+        .summary-chips {
+          display: flex; flex-wrap: wrap; gap: 0.5rem;
+        }
+        .summary-chips .chip {
+          padding: 0.35rem 0.75rem; border-radius: 999px;
+          font-size: 0.82rem; font-weight: 500;
+          border: 1px solid transparent; white-space: nowrap;
+        }
+        .chip-primary { background: rgba(0,86,179,.1); color: #0056b3; border-color: rgba(0,86,179,.2); }
+        .chip-blue    { background: rgba(13,110,253,.1); color: #0d6efd; border-color: rgba(13,110,253,.2); }
+        .chip-pink    { background: rgba(214,51,132,.1); color: #d63384; border-color: rgba(214,51,132,.2); }
+        .chip-success { background: rgba(25,135,84,.1); color: #198754; border-color: rgba(25,135,84,.2); }
+        .chip-warning { background: rgba(255,193,7,.15); color: #997404; border-color: rgba(255,193,7,.3); }
+        .chip-info    { background: rgba(13,202,240,.12); color: #087990; border-color: rgba(13,202,240,.25); }
+        .chip-secondary { background: rgba(108,117,125,.12); color: #495057; border-color: rgba(108,117,125,.25); }
+      `}</style>
     </AppLayout>
   )
 }
