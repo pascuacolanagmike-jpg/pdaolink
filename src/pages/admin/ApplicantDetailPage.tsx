@@ -8,7 +8,7 @@ import { useAuth } from '../../lib/auth'
 import { supabase } from '../../lib/supabase'
 import {
   statusColor,
-  docStatusBadge,         
+  docStatusBadge,
   DOC_STATUS_LABEL,
   fmtDate,
   fmtDateTime,
@@ -17,12 +17,10 @@ import {
   type Application,
   type StatusLog,
   type DocumentRow,
-  type DocumentStatus, 
+  type DocumentStatus,
 } from '../../lib/types'
 import { exportApplicationFormPDF } from '../../lib/formExport'
-import Alert from '../../components/Alert'
 
-// Official DOH PWD Form v4.0 options (adjust as needed)
 const DISABILITY_TYPES = [
   'Deaf or Hard of Hearing',
   'Intellectual Disability',
@@ -38,7 +36,6 @@ const DISABILITY_TYPES = [
 ]
 
 const CONGENITAL_CAUSES = ['ADHD', 'Cerebral Palsy', 'Down Syndrome', 'Others']
-
 const ACQUIRED_CAUSES = ['Chronic Illness', 'Cerebral Palsy', 'Injury', 'Others']
 
 export default function ApplicantDetailPage() {
@@ -52,6 +49,7 @@ export default function ApplicantDetailPage() {
   const [remarks, setRemarks] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [reviewing, setReviewing] = useState<DocumentRow | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -135,9 +133,19 @@ export default function ApplicantDetailPage() {
     setLogs((newLogs ?? []) as StatusLog[])
   }
 
-  const viewDocument = (doc: DocumentRow) => {
-    const url = supabase.storage.from('documents').getPublicUrl(doc.storage_path).data.publicUrl
-    window.open(url, '_blank')
+  const viewDocument = async (doc: DocumentRow) => {
+    const { data, error } = await supabase.storage
+      .from('documents')
+      .createSignedUrl(doc.storage_path, 60 * 5)
+    if (error || !data) {
+      setError(`Could not open ${doc.filename}: ${error?.message ?? 'unknown error'}`)
+      return
+    }
+    window.open(data.signedUrl, '_blank')
+  }
+
+  const handleDocReviewed = (updated: DocumentRow) => {
+    setDocuments((docs) => docs.map((d) => (d.id === updated.id ? updated : d)))
   }
 
   if (loading) {
@@ -162,6 +170,8 @@ export default function ApplicantDetailPage() {
     return Array.isArray(val) ? val : []
   }
 
+  const pendingCount = documents.filter((d) => d.status === 'pending').length
+
   return (
     <AppLayout navItems={ADMIN_NAV}>
       <div className="fade-in-up">
@@ -172,6 +182,12 @@ export default function ApplicantDetailPage() {
             </Link>
             <h3 className="mt-1 mb-0">Applicant #{app.id.slice(0, 8)}</h3>
             <span className={`badge status-badge ${statusColor(app.status)}`}>{app.status}</span>
+            {pendingCount > 0 && (
+              <span className="badge bg-warning text-dark ms-2">
+                <i className="bi bi-hourglass-split me-1" />
+                {pendingCount} document{pendingCount > 1 ? 's' : ''} awaiting review
+              </span>
+            )}
           </div>
           <button className="btn btn-primary" onClick={() => exportApplicationFormPDF(app)}>
             <i className="bi bi-file-pdf me-1" /> Export Form to PDF
@@ -189,22 +205,16 @@ export default function ApplicantDetailPage() {
                 Philippine Registry for Persons with Disabilities (PWD) Form v4.0
               </div>
               <div className="card-body p-4">
-                {/* Section 1: Application Type */}
                 <FormSection title="1. Application Type">
                   <div className="row g-3">
-                    <FormField
-                      md={4}
-                      label="Application Type"
-                      type="select"
+                    <FormField md={4} label="Application Type" type="select"
                       options={['New Applicant', 'Renewal']}
-                      value={(app as any).application_type}
-                    />
+                      value={(app as any).application_type} />
                     <FormField md={4} label="PWD Number" value={(app as any).pwd_number} />
                     <FormField md={4} label="Date Applied" type="date" value={(app as any).date_applied} />
                   </div>
                 </FormSection>
 
-                {/* Section 2: Personal Information */}
                 <FormSection title="2. Personal Information">
                   <div className="row g-3">
                     <FormField md={3} label="Last Name" value={app.last_name} />
@@ -212,78 +222,48 @@ export default function ApplicantDetailPage() {
                     <FormField md={3} label="Middle Name" value={app.middle_name} />
                     <FormField md={3} label="Suffix" value={app.suffix} />
                     <FormField md={3} label="Birth Date" type="date" value={app.birth_date} />
-                    <FormField
-                      md={3}
-                      label="Gender"
-                      type="select"
-                      options={['Male', 'Female', 'Other']}
-                      value={app.gender}
-                    />
-                    <FormField
-                      md={3}
-                      label="Civil Status"
-                      type="select"
+                    <FormField md={3} label="Gender" type="select"
+                      options={['Male', 'Female', 'Other']} value={app.gender} />
+                    <FormField md={3} label="Civil Status" type="select"
                       options={['Single', 'Married', 'Widowed', 'Separated', 'Divorced']}
-                      value={app.civil_status}
-                    />
+                      value={app.civil_status} />
                     <FormField md={3} label="Blood Type" value={app.blood_type} />
                     <FormField md={6} label="Email" type="email" value={app.email} />
-                    <FormField
-                      md={6}
-                      label="Contact Number"
-                      value={app.contact_number || (app as any).mobile_no}
-                    />
+                    <FormField md={6} label="Contact Number"
+                      value={app.contact_number || (app as any).mobile_no} />
                     <FormField md={12} label="Complete Address" value={app.address} />
                   </div>
                 </FormSection>
 
-                {/* Section 3: Type of Disability (Checkboxes) */}
                 <FormSection title="3. Type of Disability">
                   <div className="row g-3">
-                    <CheckboxGroup
-                      label="Select all that apply"
+                    <CheckboxGroup label="Select all that apply"
                       options={DISABILITY_TYPES}
-                      selected={getArray('disability_types')}
-                    />
+                      selected={getArray('disability_types')} />
                   </div>
                 </FormSection>
 
-                {/* Section 4: Cause of Disability */}
                 <FormSection title="4. Cause of Disability">
                   <div className="row g-3">
-                    <FormField
-                      md={4}
-                      label="Cause Type"
-                      type="select"
+                    <FormField md={4} label="Cause Type" type="select"
                       options={['Congenital / Inborn', 'Acquired']}
-                      value={(app as any).disability_cause_type}
-                    />
+                      value={(app as any).disability_cause_type} />
                     <div className="col-md-4">
                       <label className="form-label">Congenital Causes</label>
-                      <CheckboxGroup
-                        options={CONGENITAL_CAUSES}
-                        selected={getArray('disability_cause_congenital')}
-                        inline
-                      />
+                      <CheckboxGroup options={CONGENITAL_CAUSES}
+                        selected={getArray('disability_cause_congenital')} inline />
                     </div>
                     <div className="col-md-4">
                       <label className="form-label">Acquired Causes</label>
-                      <CheckboxGroup
-                        options={ACQUIRED_CAUSES}
-                        selected={getArray('disability_cause_acquired')}
-                        inline
-                      />
+                      <CheckboxGroup options={ACQUIRED_CAUSES}
+                        selected={getArray('disability_cause_acquired')} inline />
                     </div>
-                    <FormField
-                      md={4}
-                      label="Other (Specify)"
-                      value={(app as any).disability_cause_other_specify}
-                    />
+                    <FormField md={4} label="Other (Specify)"
+                      value={(app as any).disability_cause_other_specify} />
                     <FormField md={4} label="Legacy Cause" value={app.disability_cause} />
                   </div>
                 </FormSection>
 
-                {/* Section 5: Residence Address */}
                 <FormSection title="5. Residence Address">
                   <div className="row g-3">
                     <FormField md={3} label="Barangay" value={(app as any).barangay} />
@@ -293,113 +273,67 @@ export default function ApplicantDetailPage() {
                   </div>
                 </FormSection>
 
-                {/* Section 6: Contact Details */}
                 <FormSection title="6. Contact Details">
                   <div className="row g-3">
                     <FormField md={4} label="Landline No." value={(app as any).landline_no} />
-                    <FormField
-                      md={4}
-                      label="Mobile No."
-                      value={(app as any).mobile_no || app.contact_number}
-                    />
+                    <FormField md={4} label="Mobile No."
+                      value={(app as any).mobile_no || app.contact_number} />
                     <FormField md={4} label="Email" type="email" value={app.email} />
                   </div>
                 </FormSection>
 
-                {/* Section 7: Educational Attainment */}
                 <FormSection title="7. Educational Attainment">
                   <div className="row g-3">
-                    <FormField
-                      md={12}
-                      label="Highest Educational Attainment"
-                      type="select"
-                      options={[
-                        'None',
-                        'Kindergarten',
-                        'Elementary',
-                        'Junior High School',
-                        'Senior High School',
-                        'College',
-                        'Vocational',
-                        'Post Graduate',
-                      ]}
-                      value={(app as any).educational_attainment ?? app.education}
-                    />
+                    <FormField md={12} label="Highest Educational Attainment" type="select"
+                      options={['None','Kindergarten','Elementary','Junior High School',
+                        'Senior High School','College','Vocational','Post Graduate']}
+                      value={(app as any).educational_attainment ?? app.education} />
                   </div>
                 </FormSection>
 
-                {/* Section 8: Employment */}
                 <FormSection title="8. Employment">
                   <div className="row g-3">
-                    <FormField
-                      md={4}
-                      label="Employment Status"
-                      type="select"
-                      options={['Employed', 'Unemployed', 'Self-employed']}
-                      value={(app as any).employment_status}
-                    />
-                    <FormField
-                      md={4}
-                      label="Employment Category"
-                      type="select"
-                      options={['Government', 'Private']}
-                      value={(app as any).employment_category}
-                    />
-                    <FormField
-                      md={4}
-                      label="Employment Type"
-                      type="select"
-                      options={['Permanent/Regular', 'Seasonal', 'Casual', 'Emergency']}
-                      value={(app as any).employment_type}
-                    />
+                    <FormField md={4} label="Employment Status" type="select"
+                      options={['Employed','Unemployed','Self-employed']}
+                      value={(app as any).employment_status} />
+                    <FormField md={4} label="Employment Category" type="select"
+                      options={['Government','Private']}
+                      value={(app as any).employment_category} />
+                    <FormField md={4} label="Employment Type" type="select"
+                      options={['Permanent/Regular','Seasonal','Casual','Emergency']}
+                      value={(app as any).employment_type} />
                   </div>
                 </FormSection>
 
-                {/* Section 9: Occupation */}
                 <FormSection title="9. Occupation">
                   <div className="row g-3">
-                    <FormField
-                      md={6}
-                      label="Occupation Category"
-                      type="select"
-                      options={[
-                        'Managers',
-                        'Professionals',
+                    <FormField md={6} label="Occupation Category" type="select"
+                      options={['Managers','Professionals',
                         'Technicians and Associate Professionals',
-                        'Clerical Support Workers',
-                        'Service and Sales Workers',
+                        'Clerical Support Workers','Service and Sales Workers',
                         'Skilled Agricultural, Forestry and Fishery Workers',
                         'Craft and Related Trades Workers',
                         'Plant and Machine Operators and Assemblers',
-                        'Elementary Occupations',
-                        'Armed Forces Occupations',
-                        'Other Occupations',
-                      ]}
-                      value={(app as any).occupation_category}
-                    />
+                        'Elementary Occupations','Armed Forces Occupations',
+                        'Other Occupations']}
+                      value={(app as any).occupation_category} />
                     <FormField md={6} label="Specific Occupation (legacy)" value={app.occupation} />
                   </div>
                 </FormSection>
 
-                {/* Section 10: Organization Affiliation */}
                 <FormSection title="10. Organization Affiliation">
                   <div className="row g-3">
-                    <FormField md={6} label="Organization Name" value={(app as any).organization_affiliated} />
-                    <FormField
-                      md={6}
-                      label="Contact Person"
-                      value={(app as any).organization_contact_person}
-                    />
-                    <FormField
-                      md={6}
-                      label="Office Address"
-                      value={(app as any).organization_office_address}
-                    />
-                    <FormField md={6} label="Telephone Nos." value={(app as any).organization_tel_nos} />
+                    <FormField md={6} label="Organization Name"
+                      value={(app as any).organization_affiliated} />
+                    <FormField md={6} label="Contact Person"
+                      value={(app as any).organization_contact_person} />
+                    <FormField md={6} label="Office Address"
+                      value={(app as any).organization_office_address} />
+                    <FormField md={6} label="Telephone Nos."
+                      value={(app as any).organization_tel_nos} />
                   </div>
                 </FormSection>
 
-                {/* Section 11: ID Reference Numbers */}
                 <FormSection title="11. ID Reference Numbers">
                   <div className="row g-3">
                     <FormField md={4} label="SSS No." value={(app as any).sss_no} />
@@ -409,27 +343,36 @@ export default function ApplicantDetailPage() {
                     <FormField md={4} label="PSN No." value={(app as any).psn_no} />
                     <FormField md={4} label="PWD ID Number" value={(app as any).pwd_id_number} />
                     <FormField md={4} label="PhilSys ID" value={(app as any).philsys_id} />
-                    <FormField md={4} label="Other Gov ID Type" value={(app as any).other_gov_id_type} />
-                    <FormField md={4} label="Other Gov ID No." value={(app as any).other_gov_id_number} />
+                    <FormField md={4} label="Other Gov ID Type"
+                      value={(app as any).other_gov_id_type} />
+                    <FormField md={4} label="Other Gov ID No."
+                      value={(app as any).other_gov_id_number} />
                   </div>
                 </FormSection>
 
-                {/* Section 12: Family Background */}
                 <FormSection title="12. Family Background">
                   <div className="row g-3">
-                    <FormField md={4} label="Father's Last Name" value={(app as any).father_last_name} />
-                    <FormField md={4} label="Father's First Name" value={(app as any).father_first_name} />
-                    <FormField md={4} label="Father's Middle Name" value={(app as any).father_middle_name} />
-                    <FormField md={4} label="Mother's Last Name" value={(app as any).mother_last_name} />
-                    <FormField md={4} label="Mother's First Name" value={(app as any).mother_first_name} />
-                    <FormField md={4} label="Mother's Middle Name" value={(app as any).mother_middle_name} />
-                    <FormField md={4} label="Guardian's Last Name" value={(app as any).guardian_last_name} />
-                    <FormField md={4} label="Guardian's First Name" value={(app as any).guardian_first_name} />
-                    <FormField md={4} label="Guardian's Middle Name" value={(app as any).guardian_middle_name} />
+                    <FormField md={4} label="Father's Last Name"
+                      value={(app as any).father_last_name} />
+                    <FormField md={4} label="Father's First Name"
+                      value={(app as any).father_first_name} />
+                    <FormField md={4} label="Father's Middle Name"
+                      value={(app as any).father_middle_name} />
+                    <FormField md={4} label="Mother's Last Name"
+                      value={(app as any).mother_last_name} />
+                    <FormField md={4} label="Mother's First Name"
+                      value={(app as any).mother_first_name} />
+                    <FormField md={4} label="Mother's Middle Name"
+                      value={(app as any).mother_middle_name} />
+                    <FormField md={4} label="Guardian's Last Name"
+                      value={(app as any).guardian_last_name} />
+                    <FormField md={4} label="Guardian's First Name"
+                      value={(app as any).guardian_first_name} />
+                    <FormField md={4} label="Guardian's Middle Name"
+                      value={(app as any).guardian_middle_name} />
                   </div>
                 </FormSection>
 
-                {/* Section 13: Emergency Contact & Representative */}
                 <FormSection title="13. Emergency Contact & Representative">
                   <div className="row g-3">
                     <FormField md={4} label="Emergency Contact Name" value={app.emergency_name} />
@@ -437,40 +380,33 @@ export default function ApplicantDetailPage() {
                     <FormField md={3} label="Contact No." value={app.emergency_contact_number} />
                     <FormField md={2} label="Address" value={(app as any).emergency_address} />
                     <FormField md={4} label="Representative Name" value={app.representative_name} />
-                    <FormField
-                      md={4}
-                      label="Representative Relationship"
-                      value={(app as any).representative_relationship}
-                    />
-                    <FormField
-                      md={4}
-                      label="Representative Contact"
-                      value={(app as any).representative_contact}
-                    />
+                    <FormField md={4} label="Representative Relationship"
+                      value={(app as any).representative_relationship} />
+                    <FormField md={4} label="Representative Contact"
+                      value={(app as any).representative_contact} />
                   </div>
                 </FormSection>
 
-                {/* Section 14: Accomplished By */}
                 <FormSection title="14. Accomplished By">
                   <div className="row g-3">
-                    <FormField
-                      md={3}
-                      label="Accomplished By"
-                      type="select"
+                    <FormField md={3} label="Accomplished By" type="select"
                       options={['Applicant', 'Guardian', 'Representative']}
-                      value={(app as any).accomplished_by}
-                    />
-                    <FormField md={3} label="Last Name" value={(app as any).accomplished_last_name} />
-                    <FormField md={3} label="First Name" value={(app as any).accomplished_first_name} />
-                    <FormField md={3} label="Middle Name" value={(app as any).accomplished_middle_name} />
+                      value={(app as any).accomplished_by} />
+                    <FormField md={3} label="Last Name"
+                      value={(app as any).accomplished_last_name} />
+                    <FormField md={3} label="First Name"
+                      value={(app as any).accomplished_first_name} />
+                    <FormField md={3} label="Middle Name"
+                      value={(app as any).accomplished_middle_name} />
                   </div>
                 </FormSection>
 
-                {/* Section 15: Certifying Physician */}
                 <FormSection title="15. Certifying Physician">
                   <div className="row g-3">
-                    <FormField md={6} label="Physician's Name" value={(app as any).physician_name} />
-                    <FormField md={6} label="License No." value={(app as any).physician_license_no} />
+                    <FormField md={6} label="Physician's Name"
+                      value={(app as any).physician_name} />
+                    <FormField md={6} label="License No."
+                      value={(app as any).physician_license_no} />
                   </div>
                 </FormSection>
               </div>
@@ -478,8 +414,13 @@ export default function ApplicantDetailPage() {
 
             {/* Documents */}
             <div className="card border-0 shadow-sm mb-3">
-              <div className="card-header">
-                <i className="bi bi-folder text-primary-pdao me-1" /> Documents
+              <div className="card-header d-flex justify-content-between align-items-center">
+                <span>
+                  <i className="bi bi-folder text-primary-pdao me-1" /> Documents
+                </span>
+                {pendingCount > 0 && (
+                  <span className="badge bg-warning text-dark">{pendingCount} pending</span>
+                )}
               </div>
               <div className="table-responsive">
                 <table className="table table-hover align-middle mb-0">
@@ -488,7 +429,8 @@ export default function ApplicantDetailPage() {
                       <th>Type</th>
                       <th>Filename</th>
                       <th>Uploaded</th>
-                      <th className="text-end">View</th>
+                      <th>Status</th>
+                      <th className="text-end">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -505,16 +447,32 @@ export default function ApplicantDetailPage() {
                             {d.filename}
                           </td>
                           <td className="text-muted small">{fmtDateTime(d.uploaded_at)}</td>
+                          <td>
+                            <span className={`badge ${docStatusBadge(d.status)}`}>
+                              {DOC_STATUS_LABEL[d.status as DocumentStatus] ?? 'Pending review'}
+                            </span>
+                          </td>
                           <td className="text-end">
-                            <button className="btn btn-sm btn-soft" onClick={() => viewDocument(d)}>
-                              <i className="bi bi-eye" />
+                            <button
+                              className="btn btn-sm btn-soft me-1"
+                              onClick={() => viewDocument(d)}
+                              title="Open in new tab"
+                            >
+                              <i className="bi bi-box-arrow-up-right" />
+                            </button>
+                            <button
+                              className="btn btn-sm btn-primary"
+                              onClick={() => setReviewing(d)}
+                              title="Review this document"
+                            >
+                              <i className="bi bi-clipboard-check me-1" /> Review
                             </button>
                           </td>
                         </tr>
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={4} className="text-center text-muted py-4">
+                        <td colSpan={5} className="text-center text-muted py-4">
                           No documents uploaded.
                         </td>
                       </tr>
@@ -568,9 +526,7 @@ export default function ApplicantDetailPage() {
                       onChange={(e) => setNewStatus(e.target.value)}
                     >
                       {ALL_STATUSES.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
+                        <option key={s} value={s}>{s}</option>
                       ))}
                     </select>
                   </div>
@@ -616,6 +572,16 @@ export default function ApplicantDetailPage() {
           </div>
         </div>
       </div>
+
+      {reviewing && (
+        <DocumentReviewModal
+          doc={reviewing}
+          applicantUserId={app.user_id}
+          adminName={profile?.fullname ?? 'Admin'}
+          onClose={() => setReviewing(null)}
+          onReviewed={handleDocReviewed}
+        />
+      )}
     </AppLayout>
   )
 }
@@ -645,16 +611,14 @@ function FormField({ md, label, value, type = 'text', options }: FormFieldProps)
     <div className={`col-md-${md}`}>
       <label className="form-label">{label}</label>
       {type === 'select' ? (
-        <select className="form-select" disabled>
+        <select className="form-select" disabled value={value ?? ''}>
           <option value="">—</option>
           {options?.map((opt) => (
-            <option key={opt} value={opt} selected={value === opt}>
-              {opt}
-            </option>
+            <option key={opt} value={opt}>{opt}</option>
           ))}
         </select>
       ) : (
-        <input type={type} className="form-control" value={value || ''} disabled />
+        <input type={type} className="form-control" value={value || ''} disabled readOnly />
       )}
     </div>
   )
@@ -679,6 +643,7 @@ function CheckboxGroup({ label, options, selected, inline = false }: CheckboxGro
               type="checkbox"
               checked={selected.includes(opt)}
               disabled
+              readOnly
             />
             <label className="form-check-label">{opt}</label>
           </div>
