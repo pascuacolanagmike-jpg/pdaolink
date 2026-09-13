@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import AppLayout from '../../components/AppLayout'
 import { ADMIN_NAV } from '../../lib/nav'
 import { supabase } from '../../lib/supabase'
+import { useAuth } from '../../lib/auth'
 import {
   type Application, type DocumentRow, appFullName, fmtDate,
   GENDER_OPTIONS, BLOOD_TYPES,
@@ -44,7 +45,18 @@ interface ApprovedApplicant {
   photoUrl: string | null
 }
 
+// Pick the E-ID photo — only from APPROVED documents
+function pickApprovedPhoto(docs: DocumentRow[]): DocumentRow | null {
+  const approved = docs.filter((d) => d.status === 'approved')
+  return (
+    approved.find((d) => d.document_type === 'passport_photo') ??
+    approved.find((d) => d.document_type === 'picture_1x1') ??
+    null
+  )
+}
+
 export default function AdminEidPage() {
+  const { profile } = useAuth()
   const [applicants, setApplicants] = useState<ApprovedApplicant[]>([])
   const [filtered, setFiltered] = useState<ApprovedApplicant[]>([])
   const [loading, setLoading] = useState(true)
@@ -61,6 +73,11 @@ export default function AdminEidPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+
+  // Photo upload state
+  const [photoUploading, setPhotoUploading] = useState(false)
+  const [photoError, setPhotoError] = useState<string | null>(null)
+  const photoInput = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     ;(async () => {
@@ -80,7 +97,7 @@ export default function AdminEidPage() {
           .eq('application_id', app.id)
           .order('uploaded_at', { ascending: false })
         const allDocs = (docs ?? []) as DocumentRow[]
-        const photo = allDocs.find((d) => d.document_type === 'passport_photo') ?? allDocs[0] ?? null
+        const photo = pickApprovedPhoto(allDocs)
         if (photo) {
           const { data: blob } = await supabase.storage.from('documents').download(photo.storage_path)
           if (blob) photoUrl = URL.createObjectURL(blob)
@@ -125,7 +142,7 @@ export default function AdminEidPage() {
             .eq('application_id', app.id)
             .order('uploaded_at', { ascending: false })
           const allDocs = (docs ?? []) as DocumentRow[]
-          const photo = allDocs.find((d) => d.document_type === 'passport_photo') ?? allDocs[0] ?? null
+          const photo = pickApprovedPhoto(allDocs)
           if (photo) {
             const { data: blob } = await supabase.storage.from('documents').download(photo.storage_path)
             if (blob) photoUrl = URL.createObjectURL(blob)
@@ -147,9 +164,10 @@ export default function AdminEidPage() {
     setEditFields(eidFieldsFromApp(a.application))
     setSaveError(null)
     setSaveSuccess(null)
+    setPhotoError(null)
   }
 
-  const closeModal = () => { setSelected(null); setEditMode(false) }
+  const closeModal = () => { setSelected(null); setEditMode(false); setPhotoError(null) }
 
   const handlePrint = () => window.print()
 
@@ -191,6 +209,55 @@ export default function AdminEidPage() {
     setSaveSuccess('E-ID information updated.')
   }
 
+  // --- Admin photo upload (auto-approved) ---
+  const handlePhotoUpload = async (file: File) => {
+    if (!selected) return
+    setPhotoUploading(true)
+    setPhotoError(null)
+
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? 'jpg'
+    const path = `${selected.application.user_id}/eid-photo-${crypto.randomUUID()}.${ext}`
+
+    const { error: upErr } = await supabase.storage.from('documents').upload(path, file)
+    if (upErr) {
+      setPhotoError(upErr.message)
+      setPhotoUploading(false)
+      return
+    }
+
+    const { error: insErr } = await supabase.from('documents').insert({
+      application_id: selected.application.id,
+      document_type: 'passport_photo',
+      filename: file.name,
+      storage_path: path,
+      status: 'approved',
+      reviewed_by: profile?.fullname ?? 'Admin',
+      reviewed_at: new Date().toISOString(),
+      review_remarks: 'Uploaded by admin',
+    })
+
+    if (insErr) {
+      await supabase.storage.from('documents').remove([path])
+      setPhotoError(insErr.message)
+      setPhotoUploading(false)
+      return
+    }
+
+    const { data: blob } = await supabase.storage.from('documents').download(path)
+    if (blob) {
+      const url = URL.createObjectURL(blob)
+      setSelected((prev) => (prev ? { ...prev, photoUrl: url } : prev))
+      setApplicants((prev) =>
+        prev.map((a) =>
+          a.application.id === selected.application.id ? { ...a, photoUrl: url } : a
+        )
+      )
+    }
+
+    setPhotoUploading(false)
+    setSaveSuccess('Photo updated.')
+  }
+
   // --- Selection & deletion ---
   const toggleSelect = (id: string) => {
     setSelectedIds(prev =>
@@ -212,12 +279,6 @@ export default function AdminEidPage() {
     setDeleteError(null)
 
     try {
-      // Optionally delete linked documents first (if needed)
-      // const { error: docError } = await supabase
-      //   .from('documents')
-      //   .delete()
-      //   .in('application_id', selectedIds)
-
       const { error } = await supabase
         .from('applications')
         .delete()
@@ -225,10 +286,8 @@ export default function AdminEidPage() {
 
       if (error) throw error
 
-      // Remove from local state
       setApplicants(prev => prev.filter(a => !selectedIds.includes(a.application.id)))
       setSelectedIds([])
-      // If the deleted applicant is currently viewed in modal, close it
       if (selected && selectedIds.includes(selected.application.id)) {
         closeModal()
       }
@@ -275,7 +334,6 @@ export default function AdminEidPage() {
           </div>
         </div>
 
-        {/* Delete error alert – fixed by wrapping in a div with className */}
         {deleteError && (
           <div className="mb-3">
             <Alert variant="danger" message={deleteError} />
@@ -363,7 +421,6 @@ export default function AdminEidPage() {
         )}
       </div>
 
-      {/* E-ID Modal (unchanged) */}
       {selected && (
         <>
           <div className="modal-backdrop fade show" onClick={closeModal} style={{ zIndex: 1050 }} />
@@ -377,6 +434,18 @@ export default function AdminEidPage() {
                   <div className="d-flex gap-2">
                     {!editMode && (
                       <>
+                        <button
+                          className="btn btn-sm btn-soft"
+                          onClick={() => photoInput.current?.click()}
+                          disabled={photoUploading}
+                          title="Upload or replace the E-ID photo"
+                        >
+                          {photoUploading ? (
+                            <><span className="spinner-border spinner-border-sm me-1" /> Uploading…</>
+                          ) : (
+                            <><i className="bi bi-camera me-1" /> Change Photo</>
+                          )}
+                        </button>
                         <button className="btn btn-sm btn-outline-secondary" onClick={startEdit}>
                           <i className="bi bi-pencil-square me-1" /> Edit info
                         </button>
@@ -386,10 +455,23 @@ export default function AdminEidPage() {
                       </>
                     )}
                     <button type="button" className="btn-close" onClick={closeModal} />
+
+                    <input
+                      ref={photoInput}
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg"
+                      hidden
+                      onChange={(e) => {
+                        const f = e.target.files?.[0]
+                        if (f) handlePhotoUpload(f)
+                        e.target.value = ''
+                      }}
+                    />
                   </div>
                 </div>
                 <div className="modal-body text-center">
                   {saveError && <div className="text-start"><Alert variant="danger" message={saveError} /></div>}
+                  {photoError && <div className="text-start"><Alert variant="danger" message={photoError} /></div>}
                   {saveSuccess && !editMode && <div className="text-start"><Alert variant="success" message={saveSuccess} /></div>}
 
                   {editMode && editFields ? (
