@@ -10,6 +10,25 @@ import {
 import EidCard from '../../components/EidCard'
 import Alert from '../../components/Alert'
 
+// ─────────────────────────────────────────────────────────
+// Safe UUID — works on LAN IPs / plain HTTP
+// ─────────────────────────────────────────────────────────
+function genUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    try { return crypto.randomUUID() } catch { /* fall through */ }
+  }
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = new Uint8Array(16)
+    crypto.getRandomValues(bytes)
+    bytes[6] = (bytes[6] & 0x0f) | 0x40
+    bytes[8] = (bytes[8] & 0x3f) | 0x80
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+  }
+  const rand = () => Math.random().toString(16).slice(2, 10)
+  return `${Date.now().toString(16)}-${rand()}-${rand()}`
+}
+
 type EidEditFields = Pick<Application,
   | 'pwd_number' | 'first_name' | 'middle_name' | 'last_name' | 'suffix'
   | 'birth_date' | 'gender' | 'blood_type' | 'disability_type'
@@ -28,7 +47,11 @@ const eidFieldsFromApp = (app: Application): EidEditFields => ({
   birth_date: app.birth_date,
   gender: app.gender,
   blood_type: app.blood_type,
-  disability_type: app.disability_type,
+  // ✅ falls back to disability_types array when legacy field is empty
+  disability_type:
+    app.disability_type ||
+    (app.disability_types ?? []).join(', ') ||
+    null,
   address: app.address,
   barangay: app.barangay,
   municipality: app.municipality,
@@ -45,7 +68,6 @@ interface ApprovedApplicant {
   photoUrl: string | null
 }
 
-// Pick the E-ID photo — only from APPROVED documents
 function pickApprovedPhoto(docs: DocumentRow[]): DocumentRow | null {
   const approved = docs.filter((d) => d.status === 'approved')
   return (
@@ -69,22 +91,27 @@ export default function AdminEidPage() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
 
-  // Selection & deletion state
+  // Selection & soft-delete state
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null)
 
   // Photo upload state
   const [photoUploading, setPhotoUploading] = useState(false)
   const [photoError, setPhotoError] = useState<string | null>(null)
   const photoInput = useRef<HTMLInputElement>(null)
 
+  // ─────────────────────────────────────────────────────────
+  // Initial load — exclude soft-deleted records
+  // ─────────────────────────────────────────────────────────
   useEffect(() => {
     ;(async () => {
       const { data } = await supabase
         .from('applications')
         .select('*')
         .in('status', ['Approved', 'Ready for Pickup'])
+        .eq('is_deleted', false)                    // ← only active records
         .order('last_updated', { ascending: false })
       const apps = (data ?? []) as Application[]
 
@@ -99,7 +126,9 @@ export default function AdminEidPage() {
         const allDocs = (docs ?? []) as DocumentRow[]
         const photo = pickApprovedPhoto(allDocs)
         if (photo) {
-          const { data: blob } = await supabase.storage.from('documents').download(photo.storage_path)
+          const { data: blob } = await supabase.storage
+            .from('documents')
+            .download(photo.storage_path)
           if (blob) photoUrl = URL.createObjectURL(blob)
         }
         enriched.push({ application: app, photoUrl })
@@ -112,17 +141,31 @@ export default function AdminEidPage() {
   }, [])
 
   useEffect(() => {
-    if (!search.trim()) { setFiltered(applicants); return }
+    if (!search.trim()) {
+      setFiltered(applicants)
+      return
+    }
     const q = search.toLowerCase()
-    setFiltered(applicants.filter((a) => {
-      const name = appFullName(a.application).toLowerCase()
-      const addr = [a.application.address, a.application.barangay, a.application.municipality, a.application.province].join(' ').toLowerCase()
-      const pwd = (a.application.pwd_number || '').toLowerCase()
-      return name.includes(q) || addr.includes(q) || pwd.includes(q)
-    }))
+    setFiltered(
+      applicants.filter((a) => {
+        const name = appFullName(a.application).toLowerCase()
+        const addr = [
+          a.application.address,
+          a.application.barangay,
+          a.application.municipality,
+          a.application.province,
+        ]
+          .join(' ')
+          .toLowerCase()
+        const pwd = (a.application.pwd_number || '').toLowerCase()
+        return name.includes(q) || addr.includes(q) || pwd.includes(q)
+      })
+    )
   }, [search, applicants])
 
-  // Realtime: pick up new approvals
+  // ─────────────────────────────────────────────────────────
+  // Realtime — react to status changes AND soft-delete
+  // ─────────────────────────────────────────────────────────
   useEffect(() => {
     const channel = supabase
       .channel('admin-eid-approvals')
@@ -130,11 +173,36 @@ export default function AdminEidPage() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'applications' },
         async (payload: any) => {
-          const app = payload.new as Application
-          if (app.status !== 'Approved' && app.status !== 'Ready for Pickup') {
-            setApplicants((prev) => prev.filter((a) => a.application.id !== app.id))
+          // Hard delete (never happens now, but kept for safety)
+          if (payload.eventType === 'DELETE') {
+            const oldId = payload.old?.id
+            if (oldId) {
+              setApplicants((prev) =>
+                prev.filter((a) => a.application.id !== oldId)
+              )
+            }
             return
           }
+
+          const app = payload.new as Application
+
+          // If it's been soft-deleted, remove from this list
+          if ((app as any).is_deleted) {
+            setApplicants((prev) =>
+              prev.filter((a) => a.application.id !== app.id)
+            )
+            return
+          }
+
+          // If status moved out of the E-ID-eligible range, remove
+          if (app.status !== 'Approved' && app.status !== 'Ready for Pickup') {
+            setApplicants((prev) =>
+              prev.filter((a) => a.application.id !== app.id)
+            )
+            return
+          }
+
+          // Otherwise, (re)load the card
           let photoUrl: string | null = null
           const { data: docs } = await supabase
             .from('documents')
@@ -144,7 +212,9 @@ export default function AdminEidPage() {
           const allDocs = (docs ?? []) as DocumentRow[]
           const photo = pickApprovedPhoto(allDocs)
           if (photo) {
-            const { data: blob } = await supabase.storage.from('documents').download(photo.storage_path)
+            const { data: blob } = await supabase.storage
+              .from('documents')
+              .download(photo.storage_path)
             if (blob) photoUrl = URL.createObjectURL(blob)
           }
           setApplicants((prev) => {
@@ -154,7 +224,9 @@ export default function AdminEidPage() {
         }
       )
       .subscribe()
-    return () => { supabase.removeChannel(channel) }
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [])
 
   const openCard = (a: ApprovedApplicant) => {
@@ -167,7 +239,11 @@ export default function AdminEidPage() {
     setPhotoError(null)
   }
 
-  const closeModal = () => { setSelected(null); setEditMode(false); setPhotoError(null) }
+  const closeModal = () => {
+    setSelected(null)
+    setEditMode(false)
+    setPhotoError(null)
+  }
 
   const handlePrint = () => window.print()
 
@@ -187,7 +263,9 @@ export default function AdminEidPage() {
   }
 
   const setField = (key: keyof EidEditFields, value: string) => {
-    setEditFields((prev) => (prev ? { ...prev, [key]: value === '' ? null : value } : prev))
+    setEditFields((prev) =>
+      prev ? { ...prev, [key]: value === '' ? null : value } : prev
+    )
   }
 
   const saveEdit = async () => {
@@ -201,10 +279,22 @@ export default function AdminEidPage() {
       .select()
       .maybeSingle()
     setSaving(false)
-    if (error) { setSaveError(error.message); return }
-    const updatedApp = (data as Application) ?? { ...selected.application, ...editFields }
-    setApplicants((prev) => prev.map((a) => (a.application.id === updatedApp.id ? { ...a, application: updatedApp } : a)))
-    setSelected((prev) => (prev ? { ...prev, application: updatedApp } : prev))
+    if (error) {
+      setSaveError(error.message)
+      return
+    }
+    const updatedApp =
+      (data as Application) ?? { ...selected.application, ...editFields }
+    setApplicants((prev) =>
+      prev.map((a) =>
+        a.application.id === updatedApp.id
+          ? { ...a, application: updatedApp }
+          : a
+      )
+    )
+    setSelected((prev) =>
+      prev ? { ...prev, application: updatedApp } : prev
+    )
     setEditMode(false)
     setSaveSuccess('E-ID information updated.')
   }
@@ -216,9 +306,11 @@ export default function AdminEidPage() {
     setPhotoError(null)
 
     const ext = file.name.split('.').pop()?.toLowerCase() ?? 'jpg'
-    const path = `${selected.application.user_id}/eid-photo-${crypto.randomUUID()}.${ext}`
+    const path = `${selected.application.user_id}/eid-photo-${genUUID()}.${ext}`
 
-    const { error: upErr } = await supabase.storage.from('documents').upload(path, file)
+    const { error: upErr } = await supabase.storage
+      .from('documents')
+      .upload(path, file)
     if (upErr) {
       setPhotoError(upErr.message)
       setPhotoUploading(false)
@@ -243,13 +335,17 @@ export default function AdminEidPage() {
       return
     }
 
-    const { data: blob } = await supabase.storage.from('documents').download(path)
+    const { data: blob } = await supabase.storage
+      .from('documents')
+      .download(path)
     if (blob) {
       const url = URL.createObjectURL(blob)
       setSelected((prev) => (prev ? { ...prev, photoUrl: url } : prev))
       setApplicants((prev) =>
         prev.map((a) =>
-          a.application.id === selected.application.id ? { ...a, photoUrl: url } : a
+          a.application.id === selected.application.id
+            ? { ...a, photoUrl: url }
+            : a
         )
       )
     }
@@ -258,42 +354,62 @@ export default function AdminEidPage() {
     setSaveSuccess('Photo updated.')
   }
 
-  // --- Selection & deletion ---
+  // ─────────────────────────────────────────────────────────
+  // Selection & SOFT DELETE
+  // ─────────────────────────────────────────────────────────
   const toggleSelect = (id: string) => {
-    setSelectedIds(prev =>
-      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
     )
   }
 
   const toggleSelectAll = () => {
-    const allIds = filtered.map(a => a.application.id)
-    const allSelected = allIds.every(id => selectedIds.includes(id))
+    const allIds = filtered.map((a) => a.application.id)
+    const allSelected = allIds.every((id) => selectedIds.includes(id))
     setSelectedIds(allSelected ? [] : allIds)
   }
 
   const deleteSelected = async () => {
     if (selectedIds.length === 0) return
-    if (!window.confirm(`Delete ${selectedIds.length} selected E‑ID record(s)? This action cannot be undone.`)) return
+    const count = selectedIds.length
+    if (
+      !window.confirm(
+        `Archive ${count} selected E-ID record${count === 1 ? '' : 's'}?\n\n` +
+          `They will be hidden from E-ID Management but kept in the Archived page for record-keeping.`
+      )
+    )
+      return
 
     setDeleting(true)
     setDeleteError(null)
+    setDeleteSuccess(null)
 
     try {
+      // SOFT DELETE — mark as deleted, do NOT remove the row
       const { error } = await supabase
         .from('applications')
-        .delete()
+        .update({
+          is_deleted: true,
+          last_updated: new Date().toISOString(),
+        })
         .in('id', selectedIds)
 
       if (error) throw error
 
-      setApplicants(prev => prev.filter(a => !selectedIds.includes(a.application.id)))
-      setSelectedIds([])
+      // Remove from local state
+      setApplicants((prev) =>
+        prev.filter((a) => !selectedIds.includes(a.application.id))
+      )
       if (selected && selectedIds.includes(selected.application.id)) {
         closeModal()
       }
-      setDeleteError(null)
+      setSelectedIds([])
+      setDeleteSuccess(
+        `${count} record${count === 1 ? '' : 's'} archived successfully.`
+      )
     } catch (err: any) {
-      setDeleteError(err.message || 'Failed to delete selected records.')
+      console.error('[E-ID] archive failed:', err)
+      setDeleteError(err.message || 'Failed to archive selected records.')
     } finally {
       setDeleting(false)
     }
@@ -302,7 +418,9 @@ export default function AdminEidPage() {
   if (loading) {
     return (
       <AppLayout navItems={ADMIN_NAV}>
-        <div className="text-center py-5"><div className="spinner-border text-primary" /></div>
+        <div className="text-center py-5">
+          <div className="spinner-border text-primary" />
+        </div>
       </AppLayout>
     )
   }
@@ -314,20 +432,28 @@ export default function AdminEidPage() {
           <div>
             <h3 className="mb-1">E-ID Management</h3>
             <p className="text-muted mb-0">
-              {applicants.length} approved applicant{applicants.length !== 1 ? 's' : ''} with generated E-ID cards
+              {applicants.length} approved applicant
+              {applicants.length !== 1 ? 's' : ''} with generated E-ID cards
             </p>
           </div>
           <div className="d-flex align-items-center gap-2">
             {selectedIds.length > 0 && (
               <button
-                className="btn btn-danger btn-sm"
+                className="btn btn-warning btn-sm"
                 onClick={deleteSelected}
                 disabled={deleting}
+                title="Move to Archived (soft delete)"
               >
                 {deleting ? (
-                  <><span className="spinner-border spinner-border-sm me-1" /> Deleting…</>
+                  <>
+                    <span className="spinner-border spinner-border-sm me-1" />{' '}
+                    Archiving…
+                  </>
                 ) : (
-                  <><i className="bi bi-trash3 me-1" /> Delete Selected ({selectedIds.length})</>
+                  <>
+                    <i className="bi bi-archive me-1" /> Archive Selected (
+                    {selectedIds.length})
+                  </>
                 )}
               </button>
             )}
@@ -339,11 +465,18 @@ export default function AdminEidPage() {
             <Alert variant="danger" message={deleteError} />
           </div>
         )}
+        {deleteSuccess && (
+          <div className="mb-3">
+            <Alert variant="success" message={deleteSuccess} />
+          </div>
+        )}
 
         <div className="card border-0 shadow-sm mb-4">
           <div className="card-body">
             <div className="input-group">
-              <span className="input-group-text"><i className="bi bi-search" /></span>
+              <span className="input-group-text">
+                <i className="bi bi-search" />
+              </span>
               <input
                 type="text"
                 className="form-control"
@@ -375,7 +508,10 @@ export default function AdminEidPage() {
                     <input
                       type="checkbox"
                       className="form-check-input"
-                      checked={filtered.length > 0 && selectedIds.length === filtered.length}
+                      checked={
+                        filtered.length > 0 &&
+                        selectedIds.length === filtered.length
+                      }
                       onChange={toggleSelectAll}
                     />
                   </th>
@@ -390,8 +526,17 @@ export default function AdminEidPage() {
               <tbody>
                 {filtered.map((a) => {
                   const app = a.application
-                  const addr = [app.barangay, app.municipality, app.province].filter(Boolean).join(', ')
-                  const pwdNumber = app.pwd_number || `PDAO-${app.id.slice(0, 8).toUpperCase()}`
+                  const addr = [app.barangay, app.municipality, app.province]
+                    .filter(Boolean)
+                    .join(', ')
+                  const pwdNumber =
+                    app.pwd_number ||
+                    `PDAO-${app.id.slice(0, 8).toUpperCase()}`
+                  // ✅ falls back to disability_types array when legacy field is empty
+                  const disabilityDisplay =
+                    app.disability_type ||
+                    (app.disability_types ?? []).join(', ') ||
+                    '—'
                   return (
                     <tr key={app.id}>
                       <td>
@@ -403,12 +548,21 @@ export default function AdminEidPage() {
                         />
                       </td>
                       <td className="fw-semibold">{appFullName(app)}</td>
-                      <td><span className="badge bg-primary bg-opacity-10 text-primary-pdao">{pwdNumber}</span></td>
-                      <td className="small">{app.disability_type ?? (app.disability_types ?? []).join(', ') ?? '—'}</td>
+                      <td>
+                        <span className="badge bg-primary bg-opacity-10 text-primary-pdao">
+                          {pwdNumber}
+                        </span>
+                      </td>
+                      <td className="small">{disabilityDisplay}</td>
                       <td className="small text-muted">{addr || '—'}</td>
-                      <td className="small text-muted">{fmtDate(app.last_updated)}</td>
+                      <td className="small text-muted">
+                        {fmtDate(app.last_updated)}
+                      </td>
                       <td className="text-end">
-                        <button className="btn btn-sm btn-primary" onClick={() => openCard(a)}>
+                        <button
+                          className="btn btn-sm btn-primary"
+                          onClick={() => openCard(a)}
+                        >
                           <i className="bi bi-card-text me-1" /> View E-ID
                         </button>
                       </td>
@@ -423,8 +577,16 @@ export default function AdminEidPage() {
 
       {selected && (
         <>
-          <div className="modal-backdrop fade show" onClick={closeModal} style={{ zIndex: 1050 }} />
-          <div className="modal fade show d-block" tabIndex={-1} style={{ zIndex: 1055 }}>
+          <div
+            className="modal-backdrop fade show"
+            onClick={closeModal}
+            style={{ zIndex: 1050 }}
+          />
+          <div
+            className="modal fade show d-block"
+            tabIndex={-1}
+            style={{ zIndex: 1055 }}
+          >
             <div className="modal-dialog modal-dialog-centered">
               <div className="modal-content border-0 shadow">
                 <div className="modal-header no-print">
@@ -441,20 +603,35 @@ export default function AdminEidPage() {
                           title="Upload or replace the E-ID photo"
                         >
                           {photoUploading ? (
-                            <><span className="spinner-border spinner-border-sm me-1" /> Uploading…</>
+                            <>
+                              <span className="spinner-border spinner-border-sm me-1" />{' '}
+                              Uploading…
+                            </>
                           ) : (
-                            <><i className="bi bi-camera me-1" /> Change Photo</>
+                            <>
+                              <i className="bi bi-camera me-1" /> Change Photo
+                            </>
                           )}
                         </button>
-                        <button className="btn btn-sm btn-outline-secondary" onClick={startEdit}>
+                        <button
+                          className="btn btn-sm btn-outline-secondary"
+                          onClick={startEdit}
+                        >
                           <i className="bi bi-pencil-square me-1" /> Edit info
                         </button>
-                        <button className="btn btn-sm btn-primary" onClick={handlePrint}>
+                        <button
+                          className="btn btn-sm btn-primary"
+                          onClick={handlePrint}
+                        >
                           <i className="bi bi-printer me-1" /> Print
                         </button>
                       </>
                     )}
-                    <button type="button" className="btn-close" onClick={closeModal} />
+                    <button
+                      type="button"
+                      className="btn-close"
+                      onClick={closeModal}
+                    />
 
                     <input
                       ref={photoInput}
@@ -470,96 +647,226 @@ export default function AdminEidPage() {
                   </div>
                 </div>
                 <div className="modal-body text-center">
-                  {saveError && <div className="text-start"><Alert variant="danger" message={saveError} /></div>}
-                  {photoError && <div className="text-start"><Alert variant="danger" message={photoError} /></div>}
-                  {saveSuccess && !editMode && <div className="text-start"><Alert variant="success" message={saveSuccess} /></div>}
+                  {saveError && (
+                    <div className="text-start">
+                      <Alert variant="danger" message={saveError} />
+                    </div>
+                  )}
+                  {photoError && (
+                    <div className="text-start">
+                      <Alert variant="danger" message={photoError} />
+                    </div>
+                  )}
+                  {saveSuccess && !editMode && (
+                    <div className="text-start">
+                      <Alert variant="success" message={saveSuccess} />
+                    </div>
+                  )}
 
                   {editMode && editFields ? (
                     <div className="text-start">
                       <p className="text-muted small mb-3">
                         <i className="bi bi-info-circle me-1" />
-                        Correct any wrong information captured from the applicant's form. Changes update the E-ID immediately.
+                        Correct any wrong information captured from the
+                        applicant's form. Changes update the E-ID immediately.
                       </p>
                       <div className="row g-2">
                         <div className="col-md-4">
                           <label className="form-label small">PWD Number</label>
-                          <input className="form-control form-control-sm" value={editFields.pwd_number ?? ''} onChange={(e) => setField('pwd_number', e.target.value)} />
+                          <input
+                            className="form-control form-control-sm"
+                            value={editFields.pwd_number ?? ''}
+                            onChange={(e) => setField('pwd_number', e.target.value)}
+                          />
                         </div>
                         <div className="col-md-4">
                           <label className="form-label small">First Name</label>
-                          <input className="form-control form-control-sm" value={editFields.first_name ?? ''} onChange={(e) => setField('first_name', e.target.value)} />
+                          <input
+                            className="form-control form-control-sm"
+                            value={editFields.first_name ?? ''}
+                            onChange={(e) => setField('first_name', e.target.value)}
+                          />
                         </div>
                         <div className="col-md-4">
                           <label className="form-label small">Middle Name</label>
-                          <input className="form-control form-control-sm" value={editFields.middle_name ?? ''} onChange={(e) => setField('middle_name', e.target.value)} />
+                          <input
+                            className="form-control form-control-sm"
+                            value={editFields.middle_name ?? ''}
+                            onChange={(e) => setField('middle_name', e.target.value)}
+                          />
                         </div>
                         <div className="col-md-4">
                           <label className="form-label small">Last Name</label>
-                          <input className="form-control form-control-sm" value={editFields.last_name ?? ''} onChange={(e) => setField('last_name', e.target.value)} />
+                          <input
+                            className="form-control form-control-sm"
+                            value={editFields.last_name ?? ''}
+                            onChange={(e) => setField('last_name', e.target.value)}
+                          />
                         </div>
                         <div className="col-md-2">
                           <label className="form-label small">Suffix</label>
-                          <input className="form-control form-control-sm" value={editFields.suffix ?? ''} onChange={(e) => setField('suffix', e.target.value)} />
+                          <input
+                            className="form-control form-control-sm"
+                            value={editFields.suffix ?? ''}
+                            onChange={(e) => setField('suffix', e.target.value)}
+                          />
                         </div>
                         <div className="col-md-3">
                           <label className="form-label small">Birth Date</label>
-                          <input type="date" className="form-control form-control-sm" value={editFields.birth_date ?? ''} onChange={(e) => setField('birth_date', e.target.value)} />
+                          <input
+                            type="date"
+                            className="form-control form-control-sm"
+                            value={editFields.birth_date ?? ''}
+                            onChange={(e) => setField('birth_date', e.target.value)}
+                          />
                         </div>
                         <div className="col-md-3">
                           <label className="form-label small">Gender</label>
-                          <select className="form-select form-select-sm" value={editFields.gender ?? ''} onChange={(e) => setField('gender', e.target.value)}>
+                          <select
+                            className="form-select form-select-sm"
+                            value={editFields.gender ?? ''}
+                            onChange={(e) => setField('gender', e.target.value)}
+                          >
                             <option value="">—</option>
-                            {GENDER_OPTIONS.map((g) => <option key={g} value={g}>{g}</option>)}
+                            {GENDER_OPTIONS.map((g) => (
+                              <option key={g} value={g}>
+                                {g}
+                              </option>
+                            ))}
                           </select>
                         </div>
                         <div className="col-md-3">
                           <label className="form-label small">Blood Type</label>
-                          <select className="form-select form-select-sm" value={editFields.blood_type ?? ''} onChange={(e) => setField('blood_type', e.target.value)}>
+                          <select
+                            className="form-select form-select-sm"
+                            value={editFields.blood_type ?? ''}
+                            onChange={(e) => setField('blood_type', e.target.value)}
+                          >
                             <option value="">—</option>
-                            {BLOOD_TYPES.map((b) => <option key={b} value={b}>{b}</option>)}
+                            {BLOOD_TYPES.map((b) => (
+                              <option key={b} value={b}>
+                                {b}
+                              </option>
+                            ))}
                           </select>
                         </div>
                         <div className="col-12">
                           <label className="form-label small">Disability</label>
-                          <input className="form-control form-control-sm" value={editFields.disability_type ?? ''} onChange={(e) => setField('disability_type', e.target.value)} />
+                          <input
+                            className="form-control form-control-sm"
+                            value={editFields.disability_type ?? ''}
+                            onChange={(e) =>
+                              setField('disability_type', e.target.value)
+                            }
+                          />
                         </div>
                         <div className="col-md-4">
                           <label className="form-label small">Street Address</label>
-                          <input className="form-control form-control-sm" value={editFields.address ?? ''} onChange={(e) => setField('address', e.target.value)} />
+                          <input
+                            className="form-control form-control-sm"
+                            value={editFields.address ?? ''}
+                            onChange={(e) => setField('address', e.target.value)}
+                          />
                         </div>
                         <div className="col-md-3">
                           <label className="form-label small">Barangay</label>
-                          <input className="form-control form-control-sm" value={editFields.barangay ?? ''} onChange={(e) => setField('barangay', e.target.value)} />
+                          <input
+                            className="form-control form-control-sm"
+                            value={editFields.barangay ?? ''}
+                            onChange={(e) => setField('barangay', e.target.value)}
+                          />
                         </div>
                         <div className="col-md-3">
                           <label className="form-label small">Municipality</label>
-                          <input className="form-control form-control-sm" value={editFields.municipality ?? ''} onChange={(e) => setField('municipality', e.target.value)} />
+                          <input
+                            className="form-control form-control-sm"
+                            value={editFields.municipality ?? ''}
+                            onChange={(e) => setField('municipality', e.target.value)}
+                          />
                         </div>
                         <div className="col-md-2">
                           <label className="form-label small">Province</label>
-                          <input className="form-control form-control-sm" value={editFields.province ?? ''} onChange={(e) => setField('province', e.target.value)} />
+                          <input
+                            className="form-control form-control-sm"
+                            value={editFields.province ?? ''}
+                            onChange={(e) => setField('province', e.target.value)}
+                          />
                         </div>
                         <div className="col-md-6">
-                          <label className="form-label small">Contact / Mobile No.</label>
-                          <input className="form-control form-control-sm" value={editFields.contact_number ?? editFields.mobile_no ?? ''} onChange={(e) => { setField('contact_number', e.target.value); setField('mobile_no', e.target.value) }} />
+                          <label className="form-label small">
+                            Contact / Mobile No.
+                          </label>
+                          <input
+                            className="form-control form-control-sm"
+                            value={
+                              editFields.contact_number ??
+                              editFields.mobile_no ??
+                              ''
+                            }
+                            onChange={(e) => {
+                              setField('contact_number', e.target.value)
+                              setField('mobile_no', e.target.value)
+                            }}
+                          />
                         </div>
                         <div className="col-md-6">
                           <label className="form-label small">Physician Name</label>
-                          <input className="form-control form-control-sm" value={editFields.physician_name ?? ''} onChange={(e) => setField('physician_name', e.target.value)} />
+                          <input
+                            className="form-control form-control-sm"
+                            value={editFields.physician_name ?? ''}
+                            onChange={(e) =>
+                              setField('physician_name', e.target.value)
+                            }
+                          />
                         </div>
                         <div className="col-md-6">
-                          <label className="form-label small">Emergency Contact Name</label>
-                          <input className="form-control form-control-sm" value={editFields.emergency_name ?? ''} onChange={(e) => setField('emergency_name', e.target.value)} />
+                          <label className="form-label small">
+                            Emergency Contact Name
+                          </label>
+                          <input
+                            className="form-control form-control-sm"
+                            value={editFields.emergency_name ?? ''}
+                            onChange={(e) =>
+                              setField('emergency_name', e.target.value)
+                            }
+                          />
                         </div>
                         <div className="col-md-6">
-                          <label className="form-label small">Emergency Contact No.</label>
-                          <input className="form-control form-control-sm" value={editFields.emergency_contact_number ?? ''} onChange={(e) => setField('emergency_contact_number', e.target.value)} />
+                          <label className="form-label small">
+                            Emergency Contact No.
+                          </label>
+                          <input
+                            className="form-control form-control-sm"
+                            value={editFields.emergency_contact_number ?? ''}
+                            onChange={(e) =>
+                              setField('emergency_contact_number', e.target.value)
+                            }
+                          />
                         </div>
                       </div>
                       <div className="d-flex justify-content-end gap-2 mt-3">
-                        <button className="btn btn-soft" onClick={cancelEdit} disabled={saving}>Cancel</button>
-                        <button className="btn btn-primary" onClick={saveEdit} disabled={saving}>
-                          {saving ? <><span className="spinner-border spinner-border-sm me-1" /> Saving…</> : <><i className="bi bi-save me-1" /> Save changes</>}
+                        <button
+                          className="btn btn-soft"
+                          onClick={cancelEdit}
+                          disabled={saving}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          className="btn btn-primary"
+                          onClick={saveEdit}
+                          disabled={saving}
+                        >
+                          {saving ? (
+                            <>
+                              <span className="spinner-border spinner-border-sm me-1" />{' '}
+                              Saving…
+                            </>
+                          ) : (
+                            <>
+                              <i className="bi bi-save me-1" /> Save changes
+                            </>
+                          )}
                         </button>
                       </div>
                     </div>
@@ -572,7 +879,8 @@ export default function AdminEidPage() {
                         onFlip={() => setFlipped(!flipped)}
                       />
                       <p className="text-center text-muted small mt-3 no-print">
-                        <i className="bi bi-hand-index me-1" /> Tap the card to flip between front and back
+                        <i className="bi bi-hand-index me-1" /> Tap the card to
+                        flip between front and back
                       </p>
                     </div>
                   )}

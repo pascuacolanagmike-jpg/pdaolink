@@ -19,6 +19,7 @@ import ChangePasswordPage from './pages/client/ChangePasswordPage'
 import AdminDashboard from './pages/admin/AdminDashboard'
 import ApplicantsPage from './pages/admin/ApplicantsPage'
 import ApplicantDetailPage from './pages/admin/ApplicantDetailPage'
+import ArchivedPage from './pages/admin/ArchivedPage'                 // ← NEW
 import AdminAnnouncements from './pages/admin/AdminAnnouncements'
 import ReportsPage from './pages/admin/ReportsPage'
 import AdminEidPage from './pages/admin/AdminEidPage'
@@ -74,15 +75,16 @@ export default function App() {
       <Route path="/change-password" element={<RequireAuth role="client"><ChangePasswordPage /></RequireAuth>} />
 
       {/* Admin */}
-<Route path="/admin/dashboard" element={<RequireAuth role="admin"><AdminDashboard /></RequireAuth>} />
-<Route path="/admin/applicants" element={<RequireAuth role="admin"><ApplicantsPage /></RequireAuth>} />
-<Route path="/admin/applicant/:id" element={<RequireAuth role="admin"><ApplicantDetailPage /></RequireAuth>} />
-<Route path="/admin/announcements" element={<RequireAuth role="admin"><AdminAnnouncements /></RequireAuth>} />
-<Route path="/admin/reports" element={<RequireAuth role="admin"><ReportsPage /></RequireAuth>} />
-<Route path="/admin/e-id" element={<RequireAuth role="admin"><AdminEidPage /></RequireAuth>} />
-<Route path="/admin/change-password" element={<RequireAuth role="admin"><AdminChangePassword /></RequireAuth>} />
+      <Route path="/admin/dashboard" element={<RequireAuth role="admin"><AdminDashboard /></RequireAuth>} />
+      <Route path="/admin/applicants" element={<RequireAuth role="admin"><ApplicantsPage /></RequireAuth>} />
+      <Route path="/admin/applicant/:id" element={<RequireAuth role="admin"><ApplicantDetailPage /></RequireAuth>} />
+      <Route path="/admin/archived" element={<RequireAuth role="admin"><ArchivedPage /></RequireAuth>} />   {/* ← NEW */}
+      <Route path="/admin/announcements" element={<RequireAuth role="admin"><AdminAnnouncements /></RequireAuth>} />
+      <Route path="/admin/reports" element={<RequireAuth role="admin"><ReportsPage /></RequireAuth>} />
+      <Route path="/admin/e-id" element={<RequireAuth role="admin"><AdminEidPage /></RequireAuth>} />
+      <Route path="/admin/change-password" element={<RequireAuth role="admin"><AdminChangePassword /></RequireAuth>} />
 
-<Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
 }

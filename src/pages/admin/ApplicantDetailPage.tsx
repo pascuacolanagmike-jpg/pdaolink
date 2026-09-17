@@ -38,6 +38,82 @@ const DISABILITY_TYPES = [
 const CONGENITAL_CAUSES = ['ADHD', 'Cerebral Palsy', 'Down Syndrome', 'Others']
 const ACQUIRED_CAUSES = ['Chronic Illness', 'Cerebral Palsy', 'Injury', 'Others']
 
+// ─────────────────────────────────────────────────────────
+// Assistance tree — must match the client-side form exactly
+// ─────────────────────────────────────────────────────────
+interface AssistanceNode {
+  key: string
+  label: string
+  children?: AssistanceNode[]
+}
+
+const ASSISTANCE_TREE: AssistanceNode[] = [
+  {
+    key: 'assistive_devices',
+    label: 'Assistive Devices',
+    children: [
+      { key: 'wheelchair', label: 'Wheelchair' },
+      { key: 'crutches', label: 'Crutches' },
+      { key: 'quad_cane', label: 'Quad Cane' },
+      { key: 'single_cane', label: 'Single Cane' },
+      { key: 'walker', label: 'Walker' },
+      { key: 'stroller', label: 'Stroller' },
+      { key: 'hearing_aid', label: 'Hearing Aid' },
+      { key: 'prosthesis', label: 'Prosthesis (Artificial Leg)' },
+      { key: 'external_leg_brace', label: 'External Leg Brace' },
+    ],
+  },
+  {
+    key: 'financial_assistance',
+    label: 'Financial Assistance',
+    children: [
+      { key: 'hospitalization', label: 'Hospitalization' },
+      { key: 'dialysis_chemo', label: 'Dialysis/Chemotherapy' },
+      { key: 'reset_medical', label: 'Reset/Medical' },
+      {
+        key: 'therapy',
+        label: 'Therapy',
+        children: [
+          { key: 'therapy_speech', label: 'Speech' },
+          { key: 'therapy_occupational', label: 'Occupational' },
+          { key: 'therapy_physical', label: 'Physical' },
+        ],
+      },
+    ],
+  },
+  { key: 'neuro_dev_assessment', label: 'Neuro-Developmental Assessment' },
+  {
+    key: 'educational',
+    label: 'Educational',
+    children: [
+      { key: 'tuition_subsidy', label: 'Tuition Subsidy' },
+      { key: 'allowance', label: 'Allowance' },
+      { key: 'materials_supplies', label: 'Materials/Supplies' },
+    ],
+  },
+  { key: 'urgent_basic_needs', label: 'Urgent Basic Needs' },
+  { key: 'burial', label: 'Burial' },
+  {
+    key: 'job_search',
+    label: 'Financial Assistance for Job Searching',
+    children: [
+      { key: 'livelihood', label: 'Livelihood' },
+      { key: 'training', label: 'Training (Social/Vocational)' },
+      {
+        key: 'rehabilitation',
+        label: 'Rehabilitation',
+        children: [
+          { key: 'rehab_community', label: 'Community-based' },
+          { key: 'rehab_institution', label: 'Institution-based' },
+          { key: 'rehab_none', label: 'None' },
+        ],
+      },
+      { key: 'job_placement', label: 'Job Placement' },
+      { key: 'assistance_others', label: 'Others' },
+    ],
+  },
+]
+
 export default function ApplicantDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { profile } = useAuth()
@@ -409,6 +485,47 @@ export default function ApplicantDetailPage() {
                       value={(app as any).physician_license_no} />
                   </div>
                 </FormSection>
+
+                {/* ───────── Section 16: Assistance Received / Needed ───────── */}
+                <FormSection title="16. Assistance Received / Needed / Rehabilitation">
+                  <div className="row g-4">
+                    <div className="col-md-6">
+                      <div className="d-flex align-items-center gap-2 mb-2">
+                        <span className="badge bg-primary">
+                          <i className="bi bi-box-arrow-in-down me-1" /> Received
+                        </span>
+                        {getArray('assistance_received').includes('govt') && (
+                          <span className="badge bg-success bg-opacity-10 text-success">Gov't</span>
+                        )}
+                        {getArray('assistance_received').includes('ngo') && (
+                          <span className="badge bg-info bg-opacity-10 text-info-emphasis">NGO</span>
+                        )}
+                      </div>
+                      <AssistanceDisplay
+                        nodes={ASSISTANCE_TREE}
+                        selected={getArray('assistance_received')}
+                      />
+                    </div>
+
+                    <div className="col-md-6">
+                      <div className="d-flex align-items-center gap-2 mb-2">
+                        <span className="badge bg-danger">
+                          <i className="bi bi-hand-index-thumb me-1" /> Needed
+                        </span>
+                        {getArray('assistance_needed').includes('govt') && (
+                          <span className="badge bg-success bg-opacity-10 text-success">Gov't</span>
+                        )}
+                        {getArray('assistance_needed').includes('ngo') && (
+                          <span className="badge bg-info bg-opacity-10 text-info-emphasis">NGO</span>
+                        )}
+                      </div>
+                      <AssistanceDisplay
+                        nodes={ASSISTANCE_TREE}
+                        selected={getArray('assistance_needed')}
+                      />
+                    </div>
+                  </div>
+                </FormSection>
               </div>
             </div>
 
@@ -650,5 +767,68 @@ function CheckboxGroup({ label, options, selected, inline = false }: CheckboxGro
         ))}
       </div>
     </div>
+  )
+}
+
+/* ---------- Assistance Display (read-only tree view) ---------- */
+
+interface AssistanceDisplayProps {
+  nodes: AssistanceNode[]
+  selected: string[]
+  depth?: number
+}
+
+function AssistanceDisplay({ nodes, selected, depth = 0 }: AssistanceDisplayProps) {
+  // Show a node if it's selected OR if any descendant is selected
+  const visible = nodes.filter((n) => {
+    if (selected.includes(n.key)) return true
+    return n.children?.some(function hasSelected(child): boolean {
+      return (
+        selected.includes(child.key) ||
+        (child.children?.some(hasSelected) ?? false)
+      )
+    })
+  })
+
+  if (visible.length === 0 && depth === 0) {
+    return (
+      <p className="text-muted small mb-0 fst-italic">No assistance recorded.</p>
+    )
+  }
+
+  return (
+    <ul className={depth === 0 ? 'list-unstyled mb-0' : 'list-unstyled ms-3 mb-0'}>
+      {visible.map((node) => {
+        const isChecked = selected.includes(node.key)
+        return (
+          <li key={node.key} className="mb-1">
+            <div className="d-flex align-items-center gap-2">
+              <i
+                className={`bi ${
+                  isChecked
+                    ? 'bi-check-square-fill text-success'
+                    : 'bi-square text-muted'
+                }`}
+                style={{ fontSize: '0.85rem' }}
+              />
+              <span
+                className={
+                  isChecked ? 'fw-semibold small' : 'small text-muted'
+                }
+              >
+                {node.label}
+              </span>
+            </div>
+            {node.children && (
+              <AssistanceDisplay
+                nodes={node.children}
+                selected={selected}
+                depth={depth + 1}
+              />
+            )}
+          </li>
+        )
+      })}
+    </ul>
   )
 }

@@ -88,9 +88,13 @@ const ASSISTANCE_TREE: AssistanceNode[] = [
   },
 ]
 
+// helper: today's date in YYYY-MM-DD
+const todayISO = () => new Date().toISOString().slice(0, 10)
+
 const EMPTY: ApplicationInput = {
   application_type: 'New Applicant',
-  pwd_number: '', date_applied: '',
+  pwd_number: '',
+  date_applied: todayISO(),
   first_name: '', middle_name: '', last_name: '', suffix: '',
   birth_date: '', gender: '', civil_status: '', blood_type: '',
   address: '', barangay: '', municipality: '', province: '', region: '',
@@ -142,6 +146,7 @@ export default function ApplicationPage() {
   const navigate = useNavigate()
   const [form, setForm] = useState<ApplicationInput>(() => ({
     ...EMPTY,
+    date_applied: todayISO(),
     email: profile?.email ?? '',
     first_name: profile?.fullname?.split(' ')[0] ?? '',
     last_name: profile?.fullname?.split(' ').slice(1).join(' ') ?? '',
@@ -188,6 +193,11 @@ export default function ApplicationPage() {
     })
   }
 
+  // derived: is this a renewal?
+  const isRenewal = form.application_type === 'Renewal'
+  // PWD number editable ONLY when Renewal
+  const pwdNumberDisabled = !isRenewal
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setError(null)
@@ -201,6 +211,10 @@ export default function ApplicationPage() {
         setError(`${field.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())} is required.`)
         return
       }
+    }
+    if (isRenewal && !form.pwd_number?.trim()) {
+      setError('PWD number is required for renewal applications.')
+      return
     }
     if (!form.disability_types || form.disability_types.length === 0) {
       setError('Please select at least one type of disability.')
@@ -296,15 +310,40 @@ export default function ApplicationPage() {
             <FormCard icon="bi-clipboard-check" title="Application Details">
               <div className="row g-3">
                 <FormCol md={4} label="Application type" required>
-                  <select className="form-select" value={form.application_type} onChange={(e) => set('application_type', e.target.value)}>
+                  <select
+                    className="form-select"
+                    value={form.application_type}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      setForm((f) => ({
+                        ...f,
+                        application_type: val,
+                        // clear PWD number when switching back to New Applicant
+                        pwd_number: val === 'Renewal' ? f.pwd_number : '',
+                      }))
+                    }}
+                  >
                     {APPLICATION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </FormCol>
                 <FormCol md={4} label="PWD number (for renewal)">
-                  <input className="form-control" value={form.pwd_number ?? ''} onChange={(e) => set('pwd_number', e.target.value)} placeholder="DR-PPMNA-BBB-NNNNNNN" />
+                  <input
+                    className="form-control"
+                    value={form.pwd_number ?? ''}
+                    onChange={(e) => set('pwd_number', e.target.value)}
+                    placeholder={isRenewal ? 'DR-PPMNA-BBB-NNNNNNN' : '— select Renewal to enable —'}
+                    disabled={pwdNumberDisabled}
+                    style={pwdNumberDisabled ? { backgroundColor: '#eef2f7', cursor: 'not-allowed' } : undefined}
+                  />
                 </FormCol>
                 <FormCol md={4} label="Date applied">
-                  <input type="date" className="form-control" value={form.date_applied ?? ''} onChange={(e) => set('date_applied', e.target.value)} />
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={form.date_applied ?? ''}
+                    readOnly
+                    style={{ backgroundColor: '#eef2f7', cursor: 'not-allowed' }}
+                  />
                 </FormCol>
               </div>
             </FormCard>
@@ -354,7 +393,7 @@ export default function ApplicationPage() {
 
             <FormCard icon="bi-geo-alt" title="Address">
               <div className="row g-3">
-                <FormCol md={12} label="House no./Street/Barangay" required>
+                <FormCol md={12} label="House no./Street/Purok" required>
                   <input className="form-control" value={form.address ?? ''} onChange={(e) => set('address', e.target.value)} required />
                 </FormCol>
                 <FormCol md={3} label="Barangay">
@@ -556,13 +595,7 @@ export default function ApplicationPage() {
               </div>
             </FormCard>
 
-            <FormCard icon="bi-person-badge" title="Representative Information" subtitle="Complete only if the applicant is a minor or unable to apply themselves">
-              <div className="row g-3">
-                <FormCol md={4} label="Name"><input className="form-control" value={form.representative_name ?? ''} onChange={(e) => set('representative_name', e.target.value)} /></FormCol>
-                <FormCol md={4} label="Relationship"><input className="form-control" value={form.representative_relationship ?? ''} onChange={(e) => set('representative_relationship', e.target.value)} /></FormCol>
-                <FormCol md={4} label="Contact number"><input type="tel" className="form-control" value={form.representative_contact ?? ''} onChange={(e) => set('representative_contact', e.target.value)} /></FormCol>
-              </div>
-            </FormCard>
+            {/* Representative Information section REMOVED */}
 
             <FormCard icon="bi-card-checklist" title="Government ID Numbers" subtitle="Provide any government-issued ID">
               <div className="row g-3">
@@ -597,11 +630,16 @@ export default function ApplicationPage() {
             <FormCard
               icon="bi-clipboard2-heart"
               title="Assistance Received / Needed / Rehabilitation"
-              subtitle="Check all that apply under each column"
+              subtitle="Check all that apply. Click a category to expand its options."
             >
               <div className="row g-4">
+                {/* RECEIVED column */}
                 <div className="col-md-6">
-                  <h6 className="form-subgroup-label mb-3">Received</h6>
+                  <div className="assistance-col-header received">
+                    <i className="bi bi-box-arrow-in-down" />
+                    <span>Received</span>
+                  </div>
+
                   <div className="assistance-source mb-3">
                     <span className="text-muted small me-2">Source:</span>
                     <CheckboxRow
@@ -615,6 +653,7 @@ export default function ApplicationPage() {
                       onChange={() => toggleArray('assistance_received', 'ngo')}
                     />
                   </div>
+
                   <AssistanceTree
                     nodes={ASSISTANCE_TREE}
                     values={form.assistance_received ?? []}
@@ -622,8 +661,13 @@ export default function ApplicationPage() {
                   />
                 </div>
 
+                {/* NEEDED column */}
                 <div className="col-md-6">
-                  <h6 className="form-subgroup-label mb-3">Needed</h6>
+                  <div className="assistance-col-header needed">
+                    <i className="bi bi-hand-index-thumb" />
+                    <span>Needed</span>
+                  </div>
+
                   <div className="assistance-source mb-3">
                     <span className="text-muted small me-2">Source:</span>
                     <CheckboxRow
@@ -637,6 +681,7 @@ export default function ApplicationPage() {
                       onChange={() => toggleArray('assistance_needed', 'ngo')}
                     />
                   </div>
+
                   <AssistanceTree
                     nodes={ASSISTANCE_TREE}
                     values={form.assistance_needed ?? []}
@@ -668,12 +713,19 @@ export default function ApplicationPage() {
           border-radius: 0.8rem; padding: 1.5rem; margin-bottom: 1.5rem;
         }
         .form-official-header-inner { color: #fff; }
-        .form-official-republic { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0; opacity: 0.85; }
-        .form-official-agency { font-size: 1rem; font-weight: 700; margin-bottom: 0; }
-        .form-official-region { font-size: 0.85rem; margin-bottom: 0.8rem; opacity: 0.85; }
-        .form-official-title { font-weight: 800; font-size: 1.3rem; margin-bottom: 0.3rem; }
-        .form-official-subtitle { font-size: 0.82rem; opacity: 0.8; margin-bottom: 0; }
+        .form-official-republic { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0; opacity: 0.85; color: #fff; }
+        .form-official-agency { font-size: 1rem; font-weight: 700; margin-bottom: 0; color: #fff; }
+        .form-official-region { font-size: 0.85rem; margin-bottom: 0.8rem; opacity: 0.85; color: #fff; }
+        .form-official-title { font-weight: 800; font-size: 1.3rem; margin-bottom: 0.3rem; color: #fff !important; }
+        .form-official-title:hover,
+        .form-official-title:focus,
+        .form-official-title:active { color: #fff !important; }
+        .form-official-subtitle { font-size: 0.82rem; opacity: 0.8; margin-bottom: 0; color: #fff; }
         .form-subgroup-label { font-weight: 700; font-size: 0.85rem; color: #0056b3; margin-bottom: 0.2rem; text-transform: uppercase; letter-spacing: 0.5px; }
+
+        /* Bold field labels (dropdown / input headers) */
+        .form-label { font-weight: 700; font-size: 0.85rem; color: #1a2a44; }
+
         .checkbox-row {
           display: inline-flex; align-items: center; gap: 0.5rem;
           padding: 0.4rem 0.65rem; border-radius: 0.4rem; cursor: pointer;
@@ -684,10 +736,83 @@ export default function ApplicationPage() {
         .checkbox-row.checked { border-color: #0056b3; background: rgba(0, 86, 179, 0.06); }
         .checkbox-row input { width: 16px; height: 16px; cursor: pointer; margin: 0; }
         .assistance-source .checkbox-row { display: inline-flex; }
+
+        /* ── Assistance section ── */
+        .assistance-col-header {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          font-weight: 700;
+          font-size: 0.95rem;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          padding: 0.6rem 0.9rem;
+          border-radius: 0.5rem;
+          margin-bottom: 0.85rem;
+        }
+        .assistance-col-header.received {
+          background: linear-gradient(135deg, rgba(0, 86, 179, 0.12), rgba(0, 86, 179, 0.04));
+          color: #0056b3;
+          border-left: 4px solid #0056b3;
+        }
+        .assistance-col-header.needed {
+          background: linear-gradient(135deg, rgba(220, 53, 69, 0.12), rgba(220, 53, 69, 0.04));
+          color: #b02a37;
+          border-left: 4px solid #b02a37;
+        }
+
+        /* Dropdown toggle for parent assistance nodes */
+        .assistance-toggle {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          padding: 0.45rem 0.7rem;
+          border: 1px solid #e4e9f0;
+          border-radius: 0.4rem;
+          background: #fff;
+          cursor: pointer;
+          font-size: 0.87rem;
+          font-weight: 700;
+          transition: all 0.15s ease;
+          user-select: none;
+        }
+        .assistance-toggle:hover {
+          border-color: #b8d4f0;
+          background: #f5f9ff;
+        }
+        .assistance-toggle.open {
+          border-color: #0056b3;
+          background: rgba(0, 86, 179, 0.05);
+          border-bottom-left-radius: 0;
+          border-bottom-right-radius: 0;
+        }
+        .assistance-caret {
+          font-size: 0.8rem;
+          color: #0056b3;
+          transition: transform 0.15s ease;
+        }
+        .assistance-toggle-label { flex: 1; }
+        .assistance-toggle-check { display: inline-flex; align-items: center; }
+        .assistance-toggle-check input {
+          width: 16px; height: 16px; cursor: pointer; margin: 0;
+        }
+
+        /* Children container */
+        .assistance-dropdown {
+          border: 1px solid #0056b3;
+          border-top: none;
+          border-bottom-left-radius: 0.4rem;
+          border-bottom-right-radius: 0.4rem;
+          padding: 0.6rem 0.75rem;
+          background: #fbfdff;
+        }
+        .assistance-children { padding-left: 0.5rem; }
       `}</style>
     </AppLayout>
   )
 }
+
+// ─────────── UNTOUCHED COMPONENTS ───────────
 
 function FormCard({ icon, title, subtitle, children }: { icon: string; title: string; subtitle?: string; children: ReactNode }) {
   return (
@@ -719,6 +844,8 @@ function CheckboxRow({ label, checked, onChange, radio }: { label: string; check
   )
 }
 
+// ─────────── AssistanceTree — MODIFIED (required for dropdown + multi-select) ───────────
+
 function AssistanceTree({
   nodes,
   values,
@@ -730,25 +857,74 @@ function AssistanceTree({
   onToggle: (key: string) => void
   depth?: number
 }) {
+  const [open, setOpen] = useState<Record<string, boolean>>({})
+
+  const toggleOpen = (key: string) =>
+    setOpen((o) => ({ ...o, [key]: !o[key] }))
+
   return (
-    <div className={depth > 0 ? 'ms-3 mt-1' : ''}>
-      {nodes.map((node) => (
-        <div key={node.key} className="mb-1">
-          <CheckboxRow
-            label={node.label}
-            checked={values.includes(node.key)}
-            onChange={() => onToggle(node.key)}
-          />
-          {node.children && (
-            <AssistanceTree
-              nodes={node.children}
-              values={values}
-              onToggle={onToggle}
-              depth={depth + 1}
-            />
-          )}
-        </div>
-      ))}
+    <div className={depth > 0 ? 'assistance-children' : ''}>
+      {nodes.map((node) => {
+        const hasChildren = !!node.children?.length
+        const isOpen = !!open[node.key]
+        const isChecked = values.includes(node.key)
+
+        return (
+          <div key={node.key} className="assistance-node mb-1">
+            {hasChildren ? (
+              <>
+                {/* clickable dropdown header */}
+                <div
+                  className={`assistance-toggle ${isOpen ? 'open' : ''}`}
+                  onClick={() => toggleOpen(node.key)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      toggleOpen(node.key)
+                    }
+                  }}
+                >
+                  <i className={`bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'} assistance-caret`} />
+                  <span className="assistance-toggle-label">{node.label}</span>
+
+                  {/* selectable parent checkbox — stops the dropdown toggle */}
+                  <span
+                    className="assistance-toggle-check"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => onToggle(node.key)}
+                      aria-label={`Select ${node.label}`}
+                    />
+                  </span>
+                </div>
+
+                {/* children shown when open */}
+                {isOpen && (
+                  <div className="assistance-dropdown">
+                    <AssistanceTree
+                      nodes={node.children!}
+                      values={values}
+                      onToggle={onToggle}
+                      depth={depth + 1}
+                    />
+                  </div>
+                )}
+              </>
+            ) : (
+              <CheckboxRow
+                label={node.label}
+                checked={isChecked}
+                onChange={() => onToggle(node.key)}
+              />
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
