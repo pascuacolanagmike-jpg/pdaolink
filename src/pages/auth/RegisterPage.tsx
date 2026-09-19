@@ -163,7 +163,7 @@ export default function RegisterPage() {
           if (sensorAvailable) {
             setShowEnroll(true)
           } else {
-            navigate('/dashboard')
+            navigate('/verify', { replace: true })
           }
         }}
         variant="zero-trust"
@@ -171,8 +171,8 @@ export default function RegisterPage() {
 
       <BiometricEnrollModal
         show={showEnroll}
-        onClose={() => navigate('/dashboard')}
-        onSuccess={() => navigate('/dashboard')}
+        onClose={() => navigate('/verify', { replace: true })}
+        onSuccess={() => navigate('/verify', { replace: true })}
         title="Enable Fingerprint Unlock"
         subtitle="Secure your new account with your device's fingerprint sensor for faster and safer access."
       />

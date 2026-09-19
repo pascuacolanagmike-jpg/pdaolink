@@ -18,14 +18,101 @@ import {
 const CAUSE_TYPE_OPTIONS = ['Congenital / Inborn', 'Acquired']
 
 /* ─────────────────────────────────────────────────────────────
+   CAUAYAN CITY — 65 Barangays
+   ───────────────────────────────────────────────────────────── */
+const CAUAYAN_BARANGAYS = [
+  'Alicaocao',
+  'Alinam',
+  'Amobocan',
+  'Andarayan',
+  'Bacolod (Baculod)',
+  'Baringin Norte',
+  'Baringin Sur',
+  'Buena Suerte',
+  'Bugallon',
+  'Buyon',
+  'Cabaruan',
+  'Cabugao',
+  'Carabatan Chica',
+  'Carabatan Grande',
+  'Carabatan Punta',
+  'Carabatan Bacareno',
+  'Casalatan',
+  'San Pablo (Casap Hacienda)',
+  'Cassap Fuera',
+  'Catalina',
+  'Culalabat',
+  'Dabburab',
+  'De Vera',
+  'Dianao',
+  'Disimuray (Dissimuray)',
+  'District I (Pob.)',
+  'District II (Pob.)',
+  'District III (Pob.)',
+  'Duminit',
+  'Faustino (Sipay)',
+  'Gagabutan',
+  'Gappal',
+  'Guayabal',
+  'Labinab',
+  'Linglingay',
+  'Mabantad',
+  'Maligaya',
+  'Manaoag',
+  'Marabulig I',
+  'Marabulig II',
+  'Minante I',
+  'Minante II',
+  'Nagcampegan',
+  'Naganacan',
+  'Nagrumbuan',
+  'Nungnungan I',
+  'Nungnungan II',
+  'Pinoma',
+  'Rizal',
+  'Rogus',
+  'San Antonio',
+  'San Fermin',
+  'San Francisco',
+  'San Isidro',
+  'San Luis',
+  'Santa Luciana (Daburab 2)',
+  'Santa Maria',
+  'Sillawit',
+  'Sinippil',
+  'Tagaran',
+  'Turayong',
+  'Union',
+  'Villa Concepcion',
+  'Villa Luna',
+  'Villaflor',
+] as const
+
+/* ─────────────────────────────────────────────────────────────
+   Normalize a barangay string for loose matching:
+   trims, lowercases, collapses whitespace, strips periods and
+   any parenthetical suffix like "(Pob.)".
+   ───────────────────────────────────────────────────────────── */
+function normalizeBarangay(s: string | null | undefined): string {
+  if (!s) return ''
+  return s
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/\(pob\.?\)/g, '')
+    .replace(/\(.*?\)/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/\./g, '')
+    .trim()
+}
+
+/* ─────────────────────────────────────────────────────────────
    SECONDS THE ADMIN MUST WAIT BEFORE THE DELETE ACTUALLY FIRES
    ───────────────────────────────────────────────────────────── */
 const DELETE_COUNTDOWN_SECONDS = 5
 
 /* ─────────────────────────────────────────────────────────────
    PERSISTENT "cleared at" MARKER
-   Stored in localStorage so the state survives a full refresh,
-   tab close, or browser restart.
    ───────────────────────────────────────────────────────────── */
 const CLEARED_AT_KEY = 'pdaolink_reports_cleared_at'
 
@@ -57,7 +144,7 @@ function isAfterClearedAt(dateStr: string | null | undefined, clearedAt: Date | 
 }
 
 /* ─────────────────────────────────────────────────────────────
-   AGE BRACKETS (exactly as shown in the Word document)
+   AGE BRACKETS
    ───────────────────────────────────────────────────────────── */
 const AGE_BRACKETS = [
   { label: '0-3',   min: 0,  max: 3 },
@@ -142,6 +229,7 @@ export default function ReportsPage() {
   const [addrSearch, setAddrSearch] = useState('')
 
   // Filter states
+  const [barangayFilter, setBarangayFilter] = useState('')
   const [addrFilter, setAddrFilter] = useState('')
   const [disabilityFilter, setDisabilityFilter] = useState('')
   const [genderFilter, setGenderFilter] = useState('')
@@ -152,15 +240,15 @@ export default function ReportsPage() {
   const [educationFilter, setEducationFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
 
-  // Age range filters (kept visible even after "delete")
+  // Age range filters
   const [minAge, setMinAge] = useState('')
   const [maxAge, setMaxAge] = useState('')
 
-  // Persistent marker: when set, records submitted before it are hidden.
+  // Persistent marker
   const [clearedAt, setClearedAt] = useState<Date | null>(null)
 
   /* ─────────────────────────────────────────────────────────────
-     DATA LOADING — respects the persistent clearedAt marker
+     DATA LOADING
      ───────────────────────────────────────────────────────────── */
   const loadData = useCallback(async () => {
     const marker = readClearedAt()
@@ -176,7 +264,6 @@ export default function ReportsPage() {
 
     const allRows = (all.data ?? []) as Application[]
 
-    // Keep only records submitted AFTER the clear marker (if one exists).
     const visibleRows = allRows.filter((r) => isAfterClearedAt(r.submission_date, marker))
 
     const byStatus: Record<string, number> = {}
@@ -193,7 +280,6 @@ export default function ReportsPage() {
       }
     })
 
-    // Compute daily / monthly client-side so they respect the marker too.
     const dailyCount = visibleRows.filter((r) => {
       if (!r.submission_date) return false
       const t = new Date(r.submission_date).getTime()
@@ -223,8 +309,7 @@ export default function ReportsPage() {
   useEffect(() => { void loadData() }, [loadData])
 
   /* ─────────────────────────────────────────────────────────────
-     DELETE ALL RECORDS — persistent across refreshes.
-     Nothing is removed from the DB; a timestamp is stored locally.
+     DELETE ALL RECORDS
      ───────────────────────────────────────────────────────────── */
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [confirmText, setConfirmText] = useState('')
@@ -265,13 +350,12 @@ export default function ReportsPage() {
       const now = new Date()
       writeClearedAt(now)
 
-      // Reset local view immediately.
       setApps([])
       setAddressGroups([])
       setStats(EMPTY_STATS)
       setClearedAt(now)
 
-      // Reset filters, but keep the age range controls visible.
+      setBarangayFilter('')
       setAddrFilter('')
       setDisabilityFilter('')
       setGenderFilter('')
@@ -379,6 +463,11 @@ export default function ReportsPage() {
     const fullName = appFullName(app).toLowerCase()
     const addrParts = [app.address, app.barangay, app.municipality, app.province].filter(Boolean).join(' ').toLowerCase()
 
+    // Barangay filter — exact match on normalized strings
+    const matchBarangay =
+      barangayFilter === '' ||
+      normalizeBarangay((app as any).barangay) === normalizeBarangay(barangayFilter)
+
     const matchAddress = addrFilter.trim() === '' || addrParts.includes(addrFilter.toLowerCase())
     const matchDisability = disabilityFilter === '' || (app.disability_types && app.disability_types.includes(disabilityFilter))
     const matchGender = genderFilter === '' || app.gender === genderFilter
@@ -396,8 +485,8 @@ export default function ReportsPage() {
       else matchAge = (minAgeNum === null || age >= minAgeNum) && (maxAgeNum === null || age <= maxAgeNum)
     }
 
-    return matchAddress && matchDisability && matchGender && matchName && matchCause &&
-           matchEmployment && matchCivil && matchEducation && matchStatus && matchAge
+    return matchBarangay && matchAddress && matchDisability && matchGender && matchName &&
+           matchCause && matchEmployment && matchCivil && matchEducation && matchStatus && matchAge
   })
 
   /* ─────────────────────────────────────────────────────────────
@@ -492,8 +581,9 @@ export default function ReportsPage() {
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
     const link = document.createElement('a')
     const url = URL.createObjectURL(blob)
+    const suffix = barangayFilter ? `-${barangayFilter.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}` : ''
     link.setAttribute('href', url)
-    link.setAttribute('download', 'pdaolink-disability-statistics.csv')
+    link.setAttribute('download', `pdaolink-disability-statistics${suffix}.csv`)
     link.style.visibility = 'hidden'
     document.body.appendChild(link)
     link.click()
@@ -517,12 +607,16 @@ export default function ReportsPage() {
   }
 
   const exportFiltered = (format: 'pdf' | 'excel') => {
-    const filename = `pdaolink-filtered-report.${format === 'pdf' ? 'pdf' : 'xlsx'}`
+    const suffix = barangayFilter
+      ? `-${barangayFilter.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
+      : ''
+    const filename = `pdaolink-filtered${suffix}-report.${format === 'pdf' ? 'pdf' : 'xlsx'}`
     if (format === 'pdf') exportPDF(filteredApplicants as any, stats, filename)
     else exportExcel(filteredApplicants as any, filename)
   }
 
   const clearFilters = () => {
+    setBarangayFilter('')
     setAddrFilter('')
     setDisabilityFilter('')
     setGenderFilter('')
@@ -544,7 +638,7 @@ export default function ReportsPage() {
   }
 
   const activeFilterCount = [
-    addrFilter, disabilityFilter, genderFilter, nameSearch,
+    barangayFilter, addrFilter, disabilityFilter, genderFilter, nameSearch,
     causeFilter, employmentFilter, civilFilter, educationFilter, statusFilter,
     minAge, maxAge,
   ].filter((v) => v !== '').length
@@ -729,6 +823,11 @@ export default function ReportsPage() {
           <div className="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
             <span>
               <i className="bi bi-table text-primary-pdao me-1" /> Persons with Disabilities Statistics
+              {barangayFilter && (
+                <span className="badge bg-primary ms-2">
+                  <i className="bi bi-geo-alt me-1" /> {barangayFilter}
+                </span>
+              )}
             </span>
             <button className="btn btn-sm btn-soft" onClick={exportDisabilityStats}>
               <i className="bi bi-file-earmark-spreadsheet me-1" /> Export Full Table
@@ -808,7 +907,8 @@ export default function ReportsPage() {
 
               <div className="d-flex flex-column justify-content-center align-items-center border rounded p-4 bg-light" style={{ minWidth: '220px', width: '220px' }}>
                 <div className="text-center fw-bold mb-3" style={{ fontSize: '0.9rem', lineHeight: '1.3' }}>
-                  Total No. of Persons<br />with Disabilities<br />within Jurisdiction:
+                  Total No. of Persons<br />with Disabilities<br />
+                  {barangayFilter ? `in ${barangayFilter}` : 'within Jurisdiction'}:
                 </div>
                 <div className="fs-2 fw-bold text-primary">
                   {disabilityStats.grandTotal.toLocaleString()}
@@ -827,6 +927,11 @@ export default function ReportsPage() {
               {activeFilterCount > 0 && (
                 <span className="badge bg-info text-dark ms-2">
                   {activeFilterCount} filter{activeFilterCount !== 1 ? 's' : ''} active
+                </span>
+              )}
+              {barangayFilter && (
+                <span className="badge bg-success ms-2">
+                  <i className="bi bi-geo-alt-fill me-1" /> {barangayFilter}
                 </span>
               )}
             </span>
@@ -885,16 +990,30 @@ export default function ReportsPage() {
                   onChange={(e) => setNameSearch(e.target.value)}
                 />
               </div>
+
+              {/* ── Barangay dropdown ── */}
               <div className="col-md-3">
-                <label className="form-label small text-muted">Barangay / Address</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="e.g. Union Cauayan City"
-                  value={addrFilter}
-                  onChange={(e) => setAddrFilter(e.target.value)}
-                />
+                <label className="form-label small text-muted">
+                  <i className="bi bi-geo-alt me-1" />Barangay
+                </label>
+                <select
+                  className="form-select"
+                  value={barangayFilter}
+                  onChange={(e) => setBarangayFilter(e.target.value)}
+                >
+                  <option value="">All Barangays</option>
+                  {CAUAYAN_BARANGAYS.map((b) => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+                {barangayFilter && (
+                  <div className="small text-muted mt-1">
+                    <i className="bi bi-funnel me-1" />
+                    {filteredApplicants.length} match{filteredApplicants.length !== 1 ? 'es' : ''}
+                  </div>
+                )}
               </div>
+
               <div className="col-md-3">
                 <label className="form-label small text-muted">Disability Type</label>
                 <select
@@ -925,6 +1044,16 @@ export default function ReportsPage() {
 
             {/* ─── Filter row 2 ─── */}
             <div className="row g-3 mb-3">
+              <div className="col-md-3">
+                <label className="form-label small text-muted">Address (street / municipality)</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. Poblacion, Cauayan"
+                  value={addrFilter}
+                  onChange={(e) => setAddrFilter(e.target.value)}
+                />
+              </div>
               <div className="col-md-3">
                 <label className="form-label small text-muted">Cause of Disability</label>
                 <select
@@ -964,6 +1093,10 @@ export default function ReportsPage() {
                   ))}
                 </select>
               </div>
+            </div>
+
+            {/* ─── Filter row 3 ─── */}
+            <div className="row g-3 mb-3">
               <div className="col-md-3">
                 <label className="form-label small text-muted">Educational Attainment</label>
                 <select
@@ -977,10 +1110,6 @@ export default function ReportsPage() {
                   ))}
                 </select>
               </div>
-            </div>
-
-            {/* ─── Filter row 3 (Status + AGE RANGE — always retained) ─── */}
-            <div className="row g-3 mb-3">
               <div className="col-md-3">
                 <label className="form-label small text-muted">Application Status</label>
                 <select
@@ -995,7 +1124,7 @@ export default function ReportsPage() {
                 </select>
               </div>
 
-              <div className="col-md-3">
+              <div className="col-md-2">
                 <label className="form-label small text-muted">
                   <i className="bi bi-calendar-event me-1" />Min Age
                 </label>
@@ -1011,7 +1140,7 @@ export default function ReportsPage() {
                 />
               </div>
 
-              <div className="col-md-3">
+              <div className="col-md-2">
                 <label className="form-label small text-muted">
                   <i className="bi bi-calendar-event me-1" />Max Age
                 </label>
@@ -1032,8 +1161,8 @@ export default function ReportsPage() {
                 )}
               </div>
 
-              <div className="col-md-3">
-                <label className="form-label small text-muted d-block">Quick age ranges</label>
+              <div className="col-md-2">
+                <label className="form-label small text-muted d-block">Quick ranges</label>
                 <div className="d-flex flex-wrap gap-1">
                   <button
                     type="button"
@@ -1097,6 +1226,7 @@ export default function ReportsPage() {
                       <th>Name</th>
                       <th>Age</th>
                       <th>Gender</th>
+                      <th>Barangay</th>
                       <th>Address</th>
                       <th>Disability</th>
                       <th>Cause</th>
@@ -1109,7 +1239,7 @@ export default function ReportsPage() {
                   </thead>
                   <tbody>
                     {filteredApplicants.map((app) => {
-                      const addr = [app.barangay, app.municipality, app.province].filter(Boolean).join(', ')
+                      const addr = [app.municipality, app.province].filter(Boolean).join(', ')
                       const age = getAge(app)
                       const disabilityDisplay = Array.isArray(app.disability_types) && app.disability_types.length > 0
                         ? app.disability_types.join(', ')
@@ -1128,6 +1258,9 @@ export default function ReportsPage() {
                             ) : '—'}
                           </td>
                           <td>{app.gender || '—'}</td>
+                          <td className="small">
+                            {app.barangay || '—'}
+                          </td>
                           <td className="small text-muted">{addr || app.address || '—'}</td>
                           <td className="small">{disabilityDisplay}</td>
                           <td className="small">{app.disability_cause_type || '—'}</td>

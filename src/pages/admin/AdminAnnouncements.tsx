@@ -21,9 +21,15 @@ interface AnnouncementComment {
   updated_at?: string
   edited_at?: string | null
   is_hidden?: boolean
+  /** When set, only this user (and admins) can see the comment. */
+  visible_to_user_id?: string | null
   user?: {
     full_name?: string
     avatar_url?: string
+  } | null
+  /** Resolved target user for private replies (populated client-side) */
+  visibleToUser?: {
+    full_name?: string
   } | null
 }
 
@@ -60,11 +66,14 @@ export default function AdminAnnouncements() {
     commentId: string
     announcementId: string
     topLevelId: string
+    targetUserId: string
+    targetName: string
   } | null>(null)
   const [replyText, setReplyText] = useState('')
   const [replyBusy, setReplyBusy] = useState(false)
-  // Sticky flag — once true, stays true until the reply box is closed
   const [replyHadProfanity, setReplyHadProfanity] = useState(false)
+  /** Default TRUE — admin replies are private by default. */
+  const [replyIsPrivate, setReplyIsPrivate] = useState(true)
 
   // Edit comment
   const [editingComment, setEditingComment] = useState<AnnouncementComment | null>(null)
@@ -100,8 +109,13 @@ export default function AdminAnnouncements() {
       return
     }
 
+    // Collect ALL user ids we need to resolve: comment authors + private targets
     const userIds = Array.from(
-      new Set((commentsData ?? []).map((c: any) => c.user_id))
+      new Set(
+        (commentsData ?? []).flatMap((c: any) =>
+          [c.user_id, c.visible_to_user_id].filter(Boolean)
+        )
+      )
     )
 
     let profilesMap: Record<string, any> = {}
@@ -121,6 +135,9 @@ export default function AdminAnnouncements() {
     const enriched = (commentsData ?? []).map((c: any) => ({
       ...c,
       user: profilesMap[c.user_id] || null,
+      visibleToUser: c.visible_to_user_id
+        ? profilesMap[c.visible_to_user_id] || null
+        : null,
     }))
 
     setComments(enriched as AnnouncementComment[])
@@ -387,9 +404,12 @@ export default function AdminAnnouncements() {
       commentId: comment.id,
       announcementId: comment.announcement_id,
       topLevelId,
+      targetUserId: comment.user_id,
+      targetName: comment.user?.full_name || 'this user',
     })
     setReplyText('')
     setReplyHadProfanity(false)
+    setReplyIsPrivate(true)     // ← default to private reply
     setError(null)
   }
 
@@ -424,6 +444,8 @@ export default function AdminAnnouncements() {
       announcement_id: replyTo.announcementId,
       user_id: profile.id,
       content: filtered,
+      // 🔒 When private, only the target user will be able to SELECT this row (RLS).
+      visible_to_user_id: replyIsPrivate ? replyTo.targetUserId : null,
     }
 
     // Try with parent_id first (threaded reply)
@@ -459,13 +481,14 @@ export default function AdminAnnouncements() {
 
     console.log('[reply] inserted:', data)
 
-    // Best-effort notification
+    // Notify the target user (they're the only one who'll see a private reply)
     try {
-      const target = comments.find((c) => c.id === replyTo.commentId)
-      if (target && target.user_id !== profile.id) {
+      if (replyTo.targetUserId !== profile.id) {
         await supabase.from('notifications').insert({
-          user_id: target.user_id,
-          message: 'An admin replied to your comment.',
+          user_id: replyTo.targetUserId,
+          message: replyIsPrivate
+            ? 'An admin sent you a private reply.'
+            : 'An admin replied to your comment.',
           link: '/announcements',
         })
       }
@@ -473,9 +496,10 @@ export default function AdminAnnouncements() {
       console.warn('[reply] notification failed:', e)
     }
 
-    setSuccess('Reply posted.')
+    setSuccess(replyIsPrivate ? 'Private reply sent.' : 'Reply posted.')
     setReplyText('')
     setReplyHadProfanity(false)
+    setReplyIsPrivate(true)
     setReplyTo(null)
     setReplyBusy(false)
     await loadComments()
@@ -512,13 +536,14 @@ export default function AdminAnnouncements() {
     const replies = comments.filter((c) => c.parent_id === comment.id)
     const isReplying = replyTo?.commentId === comment.id
     const isRevealed = revealedComments.has(comment.id)
+    const isPrivate = Boolean(comment.visible_to_user_id)
 
     return (
       <div
         key={comment.id}
         className={`comment-block ${isReply ? 'comment-reply' : ''} ${
           comment.is_hidden ? 'comment-hidden' : ''
-        }`}
+        } ${isPrivate ? 'comment-private' : ''}`}
       >
         <div className="d-flex justify-content-between align-items-start gap-2">
           <div className="small text-muted">
@@ -533,6 +558,15 @@ export default function AdminAnnouncements() {
             {comment.is_hidden && (
               <span className="badge bg-warning text-dark ms-2">
                 <i className="bi bi-eye-slash me-1" /> Hidden
+              </span>
+            )}
+            {isPrivate && (
+              <span
+                className="badge bg-dark bg-opacity-75 ms-2"
+                title={`Only visible to ${comment.visibleToUser?.full_name || 'the addressed user'}`}
+              >
+                <i className="bi bi-lock-fill me-1" />
+                Private → {comment.visibleToUser?.full_name || 'user'}
               </span>
             )}
             {!profanity.clean && (
@@ -615,6 +649,36 @@ export default function AdminAnnouncements() {
                 Offensive words were automatically masked with asterisks.
               </div>
             )}
+
+            {/* ── Private / public toggle ────────────────── */}
+            <div className="form-check mb-2">
+              <input
+                className="form-check-input"
+                type="checkbox"
+                id={`private-reply-${comment.id}`}
+                checked={replyIsPrivate}
+                onChange={(e) => setReplyIsPrivate(e.target.checked)}
+              />
+              <label
+                className="form-check-label small"
+                htmlFor={`private-reply-${comment.id}`}
+              >
+                {replyIsPrivate ? (
+                  <>
+                    <i className="bi bi-lock-fill text-dark me-1" />
+                    <strong>Private</strong> — only{' '}
+                    <strong>{comment.user?.full_name || 'this user'}</strong> will see
+                    this reply.
+                  </>
+                ) : (
+                  <>
+                    <i className="bi bi-globe2 text-secondary me-1" />
+                    Public — everyone viewing this announcement can see it.
+                  </>
+                )}
+              </label>
+            </div>
+
             <div className="d-flex gap-2">
               <button
                 type="button"
@@ -625,6 +689,10 @@ export default function AdminAnnouncements() {
                 {replyBusy ? (
                   <>
                     <span className="spinner-border spinner-border-sm me-1" /> Sending…
+                  </>
+                ) : replyIsPrivate ? (
+                  <>
+                    <i className="bi bi-send-lock me-1" /> Send private reply
                   </>
                 ) : (
                   <>
@@ -639,6 +707,7 @@ export default function AdminAnnouncements() {
                   setReplyTo(null)
                   setReplyText('')
                   setReplyHadProfanity(false)
+                  setReplyIsPrivate(true)
                 }}
               >
                 Cancel
@@ -661,8 +730,9 @@ export default function AdminAnnouncements() {
       <div className="fade-in-up">
         <h3 className="mb-1">Announcements</h3>
         <p className="text-muted mb-4">
-          Create, edit, pin, and delete notices for applicants. Reply to comments, hide
-          them, and flagged offensive language is detected automatically.
+          Create, edit, pin, and delete notices for applicants. Reply to comments,
+          hide them, and flagged offensive language is detected automatically.
+          Replies can be <strong>private</strong> so only the addressed user sees them.
         </p>
 
         {error && <Alert variant="danger" message={error} />}
@@ -1095,6 +1165,10 @@ export default function AdminAnnouncements() {
         .comment-hidden {
           opacity: 0.55;
           background: #fef3c7;
+        }
+        .comment-private {
+          background: #f3f0ff;
+          border-left: 3px solid #6f42c1;
         }
         .comment-blurred {
           filter: blur(4px);

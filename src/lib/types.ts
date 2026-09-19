@@ -129,6 +129,11 @@ export interface Profile {
   gender: string | null
   civil_status: string | null
   created_at: string
+
+  // Identity verification (added for applicant review flow)
+  verification_status: 'unverified' | 'pending' | 'approved' | 'rejected' | 'resubmit'
+  verification_note: string | null
+  verification_submitted_at: string | null
 }
 
 export interface Application {

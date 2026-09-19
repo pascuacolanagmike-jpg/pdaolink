@@ -9,11 +9,12 @@ export const CLIENT_NAV = [
 ]
 
 export const ADMIN_NAV = [
-  { to: '/admin/dashboard', icon: 'bi-speedometer2', label: 'Dashboard' },
-  { to: '/admin/applicants', icon: 'bi-people', label: 'Applicants' },
-  { to: '/admin/archived', icon: 'bi-archive', label: 'Archived' },        // ← NEW
-  { to: '/admin/e-id', icon: 'bi-card-text', label: 'E-ID' },
-  { to: '/admin/announcements', icon: 'bi-megaphone', label: 'Announcements' },
-  { to: '/admin/reports', icon: 'bi-bar-chart', label: 'Reports' },
+  { to: '/admin/dashboard',     icon: 'bi-speedometer2', label: 'Dashboard' },
+  { to: '/admin/verifications', icon: 'bi-shield-check', label: 'Verifications' },  // ← NEW
+  { to: '/admin/applicants',    icon: 'bi-people',       label: 'Applicants' },
+  { to: '/admin/archived',      icon: 'bi-archive',      label: 'Archived' },
+  { to: '/admin/e-id',          icon: 'bi-card-text',    label: 'E-ID' },
+  { to: '/admin/announcements', icon: 'bi-megaphone',    label: 'Announcements' },
+  { to: '/admin/reports',       icon: 'bi-bar-chart',    label: 'Reports' },
   { to: '/admin/change-password', label: 'Change Password', icon: 'bi-key' },
 ]

@@ -33,7 +33,7 @@ const REQUIRED_DOCS: DocRequirement[] = [
     label: '1x1 Picture (2 pcs)',
     description: 'With name and signature or thumb mark at the back. Only PNG or JPEG images allowed.',
     required: true,
-    imageOnly: true, // ← locked to images only
+    imageOnly: true,
   },
   {
     key: 'barangay_residence_cert',
@@ -80,32 +80,19 @@ const acceptFor = (req: DocRequirement) =>
 
 // ─────────────────────────────────────────────────────────
 // Safe UUID generator
-// Works in every context: HTTPS, localhost, LAN IPs, plain HTTP.
-// `crypto.randomUUID` is only available in secure contexts, so we
-// fall back to `crypto.getRandomValues`, and finally to a
-// timestamp+random combo for the rare browser missing both.
 // ─────────────────────────────────────────────────────────
 function genUUID(): string {
-  // 1) Native, fast path (HTTPS / localhost)
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    try {
-      return crypto.randomUUID()
-    } catch {
-      // fall through if it throws for any reason
-    }
+    try { return crypto.randomUUID() } catch { /* fall through */ }
   }
-
-  // 2) RFC4122 v4 via getRandomValues (widely supported, works on HTTP)
   if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
     const bytes = new Uint8Array(16)
     crypto.getRandomValues(bytes)
-    bytes[6] = (bytes[6] & 0x0f) | 0x40 // version 4
-    bytes[8] = (bytes[8] & 0x3f) | 0x80 // variant 10
+    bytes[6] = (bytes[6] & 0x0f) | 0x40
+    bytes[8] = (bytes[8] & 0x3f) | 0x80
     const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
   }
-
-  // 3) Last-resort fallback (very old browsers)
   const rand = () => Math.random().toString(16).slice(2, 10)
   return `${Date.now().toString(16)}-${rand()}-${rand()}`
 }
@@ -146,8 +133,6 @@ export default function UploadPage() {
   // Validate file — aware of image-only requirements
   const validateFile = (file: File, req: DocRequirement): string | null => {
     const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
-
-    // image-only check first
     if (req.imageOnly) {
       if (!IMAGE_ONLY_EXTENSIONS.includes(ext)) {
         return `${file.name}: Only PNG, JPG, or JPEG images are allowed for "${req.label}".`
@@ -157,7 +142,6 @@ export default function UploadPage() {
         return `${file.name}: Invalid type. Allowed: PDF, JPG, JPEG, PNG.`
       }
     }
-
     if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
       return `${file.name}: Exceeds ${MAX_UPLOAD_MB} MB.`
     }
@@ -179,7 +163,7 @@ export default function UploadPage() {
 
     try {
       const ext = file.name.split('.').pop()?.toLowerCase() ?? 'bin'
-      const path = `${profile.id}/${genUUID()}.${ext}` // ← safe UUID
+      const path = `${profile.id}/${genUUID()}.${ext}`
 
       const { error: upErr } = await supabase.storage
         .from('documents')
@@ -190,6 +174,12 @@ export default function UploadPage() {
         return
       }
 
+      // Determine if this is a re-upload (previous doc rejected)
+      const previous = documents.find(
+        (d) => d.document_type === req.key && d.status === 'rejected'
+      )
+      const isReupload = Boolean(previous)
+
       const { data, error } = await supabase
         .from('documents')
         .insert({
@@ -197,30 +187,47 @@ export default function UploadPage() {
           document_type: req.key,
           filename: file.name,
           storage_path: path,
+          status: 'pending',            // reset back to pending for review
+          reviewed_by: null,
+          reviewed_at: null,
+          review_remarks: null,
         })
         .select()
         .single()
 
       if (error) {
-        // roll back the orphaned storage object
         await supabase.storage.from('documents').remove([path])
         setErrors([`${file.name}: ${error.message}`])
         return
       }
 
       setDocuments((d) => [data as DocumentRow, ...d])
-      setSuccess(`${prettyDocType(req.key)} uploaded.`)
+      setSuccess(
+        isReupload
+          ? `${prettyDocType(req.key)} re-uploaded. PDAO will review it shortly.`
+          : `${prettyDocType(req.key)} uploaded.`
+      )
+
+      // If re-uploading after a rejection, reset the application back to Pending
+      // so the admin sees it in their review queue again.
+      if (isReupload && application.status !== 'Pending') {
+        await supabase
+          .from('applications')
+          .update({ status: 'Pending', last_updated: new Date().toISOString() })
+          .eq('id', application.id)
+        setApplication({ ...application, status: 'Pending' as any })
+      }
 
       await supabase.from('notifications').insert({
         user_id: profile.id,
-        message: `Document "${prettyDocType(req.key)}" uploaded.`,
+        message: isReupload
+          ? `Document "${prettyDocType(req.key)}" re-uploaded for review.`
+          : `Document "${prettyDocType(req.key)}" uploaded.`,
         link: '/upload',
       })
     } catch (e: any) {
-      // Catch any unexpected runtime error so the button never stays stuck
       setErrors([`${file.name}: ${e?.message ?? 'Unexpected error during upload.'}`])
     } finally {
-      // Always clear the "Uploading…" state, success or failure
       setUploadingType(null)
     }
   }
@@ -246,13 +253,28 @@ export default function UploadPage() {
     )
   }
 
-  // Counts for progress bar
+  // ─────────────────────────────────────────────────────────
+  // Latest document per type (documents sorted by uploaded_at desc)
+  // ─────────────────────────────────────────────────────────
+  const latestByType = new Map<string, DocumentRow>()
+  for (const d of documents) {
+    if (!latestByType.has(d.document_type)) latestByType.set(d.document_type, d)
+  }
+
+  // Counts for progress bar — a rejected doc does NOT satisfy the requirement
   const requiredKeys = REQUIRED_DOCS.filter((r) => r.required).map((r) => r.key)
-  const uploadedKeys = new Set(documents.map((d) => d.document_type))
+  const uploadedKeys = new Set(
+    Array.from(latestByType.entries())
+      .filter(([, d]) => d.status !== 'rejected')
+      .map(([k]) => k)
+  )
   const uploadedRequired = requiredKeys.filter((k) => uploadedKeys.has(k)).length
   const totalRequired = requiredKeys.length
   const allRequiredDone = uploadedRequired === totalRequired
   const pct = Math.round((uploadedRequired / totalRequired) * 100)
+
+  // Docs rejected by admin — banner count
+  const rejectedDocs = documents.filter((d) => d.status === 'rejected')
 
   return (
     <AppLayout navItems={CLIENT_NAV}>
@@ -265,6 +287,17 @@ export default function UploadPage() {
 
         {success && <Alert variant="success" message={success} />}
         {errors.map((e, i) => <Alert key={i} variant="danger" message={e} />)}
+
+        {rejectedDocs.length > 0 && (
+          <Alert
+            variant="danger"
+            message={
+              rejectedDocs.length === 1
+                ? `1 document was rejected by PDAO. Please re-upload a corrected copy below.`
+                : `${rejectedDocs.length} documents were rejected by PDAO. Please re-upload corrected copies below.`
+            }
+          />
+        )}
 
         {!application ? (
           <div className="card border-0 shadow-sm">
@@ -316,16 +349,22 @@ export default function UploadPage() {
               </div>
               <div className="list-group list-group-flush">
                 {REQUIRED_DOCS.map((req) => {
+                  const latest = latestByType.get(req.key)
+                  const isRejected = latest?.status === 'rejected'
                   const uploaded = uploadedKeys.has(req.key)
                   const isUploading = uploadingType === req.key
                   return (
                     <div key={req.key} className="list-group-item py-3">
                       <div className="d-flex flex-wrap align-items-start gap-3">
                         <div
-                          className={`req-icon ${uploaded ? 'ok' : req.required ? 'missing' : 'optional'}`}
+                          className={`req-icon ${
+                            uploaded ? 'ok' : isRejected ? 'rejected' : req.required ? 'missing' : 'optional'
+                          }`}
                         >
                           {uploaded ? (
                             <i className="bi bi-check-lg" />
+                          ) : isRejected ? (
+                            <i className="bi bi-x-lg" />
                           ) : (
                             <i className={`bi ${req.forRepresentative ? 'bi-people' : 'bi-file-earmark-text'}`} />
                           )}
@@ -343,8 +382,19 @@ export default function UploadPage() {
                                 <i className="bi bi-image me-1" /> Images only
                               </span>
                             )}
+                            {isRejected && (
+                              <span className="badge bg-danger">
+                                <i className="bi bi-x-circle me-1" /> Rejected
+                              </span>
+                            )}
                           </div>
                           <div className="small text-muted">{req.description}</div>
+                          {isRejected && latest?.review_remarks && (
+                            <div className="small text-danger mt-1">
+                              <i className="bi bi-exclamation-circle me-1" />
+                              <strong>Reason:</strong> {latest.review_remarks}
+                            </div>
+                          )}
                         </div>
                         <div className="ms-auto">
                           {uploaded ? (
@@ -355,13 +405,17 @@ export default function UploadPage() {
                             <>
                               <button
                                 type="button"
-                                className="btn btn-sm btn-primary"
+                                className={`btn btn-sm ${isRejected ? 'btn-warning' : 'btn-primary'}`}
                                 disabled={isUploading}
                                 onClick={() => fileInputs.current[req.key]?.click()}
                               >
                                 {isUploading ? (
                                   <>
                                     <span className="spinner-border spinner-border-sm me-1" /> Uploading…
+                                  </>
+                                ) : isRejected ? (
+                                  <>
+                                    <i className="bi bi-arrow-clockwise me-1" /> Re-upload
                                   </>
                                 ) : (
                                   <>
@@ -432,9 +486,18 @@ export default function UploadPage() {
                             )}
                           </td>
                           <td className="text-end">
-                            <button className="btn btn-sm btn-soft" onClick={() => handleDownload(d)}>
+                            <button className="btn btn-sm btn-soft me-1" onClick={() => handleDownload(d)}>
                               <i className="bi bi-download" />
                             </button>
+                            {d.status === 'rejected' && (
+                              <button
+                                className="btn btn-sm btn-warning"
+                                onClick={() => fileInputs.current[d.document_type]?.click()}
+                                title="Upload a replacement"
+                              >
+                                <i className="bi bi-arrow-clockwise me-1" /> Re-upload
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))
@@ -462,6 +525,7 @@ export default function UploadPage() {
         .req-icon.ok { background: rgba(25,135,84,.12); color: #198754; }
         .req-icon.missing { background: rgba(220,53,69,.1); color: #dc3545; }
         .req-icon.optional { background: rgba(108,117,125,.12); color: #6c757d; }
+        .req-icon.rejected { background: rgba(255,193,7,.18); color: #b8860b; }
       `}</style>
     </AppLayout>
   )
