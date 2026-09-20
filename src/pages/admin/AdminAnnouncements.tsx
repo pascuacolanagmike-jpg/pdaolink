@@ -1174,7 +1174,7 @@ export default function AdminAnnouncements() {
           filter: blur(4px);
           user-select: none;
           transition: filter 0.15s ease;
-        }
+        }word
       `}</style>
     </AppLayout>
   )
