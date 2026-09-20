@@ -11,7 +11,6 @@ import {
   type Application,
 } from '../../lib/types'
 
-// All the statuses an application can hold
 const STATUS_COLUMNS = [
   'Under Review',
   'Needs Revision',
@@ -22,11 +21,6 @@ const STATUS_COLUMNS = [
 
 type StatusColumn = (typeof STATUS_COLUMNS)[number]
 
-/**
- * Archived rows may carry an extra `archived_hidden` flag.
- * If the column does not exist yet, `archived_hidden` is simply `undefined`
- * and the record is treated as "not hidden" — the page still works.
- */
 type ArchivedApplication = Application & {
   archived_hidden?: boolean | null
   last_updated?: string | null
@@ -40,22 +34,27 @@ interface ConfirmState {
 }
 
 interface ToastState {
-  type: 'success' | 'danger'
+  type: 'success' | 'danger' | 'warning'
   text: string
 }
 
-const HIDDEN_COLUMN_HINT =
-  'Missing column `archived_hidden`. Run: ALTER TABLE public.applications ADD COLUMN IF NOT EXISTS archived_hidden boolean NOT NULL DEFAULT false;'
+const HIDDEN_COLUMN_SQL =
+  'ALTER TABLE public.applications ADD COLUMN IF NOT EXISTS archived_hidden boolean NOT NULL DEFAULT false;'
+
+const RLS_DELETE_HINT =
+  'This usually means a Row Level Security (RLS) policy is blocking DELETE on the "applications" table. Run this in Supabase SQL Editor:\n\nCREATE POLICY "Admins can delete applications"\nON public.applications FOR DELETE\nTO authenticated\nUSING (public.is_admin());'
+
+const RLS_UPDATE_HINT =
+  'This usually means a Row Level Security (RLS) policy is blocking UPDATE on the "applications" table. Make sure admins are allowed to UPDATE applications.'
 
 const isHidden = (a: ArchivedApplication) => a.archived_hidden === true
 
-/** Turns raw Postgres errors into something actionable for the admin. */
 function describeError(message: string): string {
   if (
     /archived_hidden/i.test(message) &&
     /(column|schema|does not exist)/i.test(message)
   ) {
-    return `${message} — ${HIDDEN_COLUMN_HINT}`
+    return `${message}\n\nRun this in Supabase SQL Editor:\n${HIDDEN_COLUMN_SQL}`
   }
   return message
 }
@@ -77,6 +76,9 @@ export default function ArchivedPage() {
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState<ToastState | null>(null)
 
+  // Whether the DB actually has the archived_hidden column
+  const [hideSupported, setHideSupported] = useState<boolean | null>(null)
+
   const [searchInput, setSearchInput] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusColumn | ''>('')
@@ -94,15 +96,27 @@ export default function ArchivedPage() {
     const { data, error } = await supabase
       .from('applications')
       .select('*')
-      .eq('is_deleted', true) // ← ONLY deleted
+      .eq('is_deleted', true)
       .order('last_updated', { ascending: false, nullsFirst: false })
 
     if (error) {
       setError(describeError(error.message))
       setAll([])
-    } else {
-      setAll((data ?? []) as ArchivedApplication[])
+      setLoading(false)
+      return
     }
+
+    const rows = (data ?? []) as ArchivedApplication[]
+    setAll(rows)
+
+    // Probe: does the column exist? If any row has the key, yes.
+    // If we get zero rows we can't tell — assume supported so we don't nag.
+    if (rows.length > 0) {
+      setHideSupported(
+        Object.prototype.hasOwnProperty.call(rows[0], 'archived_hidden'),
+      )
+    }
+
     setLoading(false)
   }, [])
 
@@ -110,14 +124,14 @@ export default function ArchivedPage() {
     void loadArchive()
   }, [loadArchive])
 
-  // ── Auto-dismiss toast ──
   useEffect(() => {
     if (!toast) return
-    const t = window.setTimeout(() => setToast(null), 5000)
+    // Keep error/warning toasts longer so admins can read the SQL hint
+    const ms = toast.type === 'success' ? 3500 : 12000
+    const t = window.setTimeout(() => setToast(null), ms)
     return () => window.clearTimeout(t)
   }, [toast])
 
-  // ── Records currently visible (respects the "show hidden" toggle) ──
   const visibleAll = useMemo(
     () => (showHidden ? all : all.filter((a) => !isHidden(a))),
     [all, showHidden],
@@ -128,7 +142,6 @@ export default function ArchivedPage() {
     [all],
   )
 
-  // ── Apply search + status filter ──
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
 
@@ -158,7 +171,6 @@ export default function ArchivedPage() {
     })
   }, [visibleAll, searchQuery, statusFilter])
 
-  // ── Counts per status ──
   const counts = useMemo(() => {
     const base: Record<StatusColumn, number> = {
       'Under Review': 0,
@@ -177,7 +189,6 @@ export default function ArchivedPage() {
 
   const total = visibleAll.length
 
-  // ── Selection (derived, so stale ids are ignored automatically) ──
   const selectedRows = useMemo(
     () => filtered.filter((a) => selectedIds.has(a.id)),
     [filtered, selectedIds],
@@ -229,9 +240,15 @@ export default function ArchivedPage() {
     if (e.key === 'Enter') handleSearch()
   }
 
-  // ── Open / close the confirmation dialog ──
   const openConfirm = (kind: ConfirmKind, ids: string[]) => {
     if (ids.length === 0) return
+    if ((kind === 'hide' || kind === 'unhide') && hideSupported === false) {
+      setToast({
+        type: 'warning',
+        text: `The "archived_hidden" column is missing.\n\nRun this in Supabase SQL Editor:\n${HIDDEN_COLUMN_SQL}`,
+      })
+      return
+    }
     setConfirmText('')
     setConfirm({ kind, ids })
   }
@@ -242,7 +259,7 @@ export default function ArchivedPage() {
     setConfirmText('')
   }
 
-  // ── Perform the confirmed action ──
+  // ── Perform the confirmed action (VERIFIED against the DB) ──
   const runConfirmedAction = async () => {
     if (!confirm) return
     const { kind, ids } = confirm
@@ -254,78 +271,124 @@ export default function ArchivedPage() {
 
     setBusy(true)
 
+    // ── HARD DELETE ──
     if (kind === 'delete') {
-      const { error } = await supabase
+      const { data: removed, error } = await supabase
         .from('applications')
         .delete()
         .in('id', ids)
+        .select('id')          // ← REQUIRED: without this, RLS blocks silently
 
       setBusy(false)
 
       if (error) {
         setToast({
           type: 'danger',
-          text: `Could not delete record(s): ${describeError(error.message)}`,
+          text: `Delete failed: ${describeError(error.message)}`,
         })
         return
       }
 
-      const removed = new Set(ids)
-      setAll((prev) => prev.filter((a) => !removed.has(a.id)))
+      const removedIds = new Set((removed ?? []).map((r: any) => r.id))
+      const blocked = ids.filter((id) => !removedIds.has(id))
+
+      // Only remove from local state the ones that were REALLY removed
+      setAll((prev) => prev.filter((a) => !removedIds.has(a.id)))
       setSelectedIds((prev) => {
         const next = new Set(prev)
-        for (const id of ids) next.delete(id)
+        for (const id of removedIds) next.delete(id)
         return next
       })
       setConfirm(null)
       setConfirmText('')
-      setToast({
-        type: 'success',
-        text: `Permanently deleted ${ids.length} record${
-          ids.length === 1 ? '' : 's'
-        }.`,
-      })
+
+      if (removedIds.size === 0) {
+        setToast({
+          type: 'danger',
+          text: `Nothing was deleted. ${RLS_DELETE_HINT}`,
+        })
+        return
+      }
+
+      if (blocked.length > 0) {
+        setToast({
+          type: 'warning',
+          text: `Deleted ${removedIds.size} of ${ids.length}. ${blocked.length} were blocked by the database. ${RLS_DELETE_HINT}`,
+        })
+      } else {
+        setToast({
+          type: 'success',
+          text: `Permanently deleted ${removedIds.size} record${
+            removedIds.size === 1 ? '' : 's'
+          }.`,
+        })
+      }
       return
     }
 
-    // hide / unhide
+    // ── HIDE / UNHIDE ──
     const hidden = kind === 'hide'
-    const { error } = await supabase
+
+    const { data: updated, error } = await supabase
       .from('applications')
       .update({ archived_hidden: hidden })
       .in('id', ids)
+      .select('id')             // ← REQUIRED: verify it actually changed
 
     setBusy(false)
 
     if (error) {
       setToast({
         type: 'danger',
-        text: `Could not ${hidden ? 'hide' : 'restore'} record(s): ${describeError(
+        text: `${hidden ? 'Hide' : 'Restore'} failed: ${describeError(
           error.message,
         )}`,
       })
       return
     }
 
-    const affected = new Set(ids)
-    setAll((prev) =>
-      prev.map((a) =>
-        affected.has(a.id) ? { ...a, archived_hidden: hidden } : a,
-      ),
-    )
+    const updatedIds = new Set((updated ?? []).map((r: any) => r.id))
+    const blocked = ids.filter((id) => !updatedIds.has(id))
+
+    if (updatedIds.size > 0) {
+      setAll((prev) =>
+        prev.map((a) =>
+          updatedIds.has(a.id) ? { ...a, archived_hidden: hidden } : a,
+        ),
+      )
+    }
+
     setSelectedIds((prev) => {
       const next = new Set(prev)
-      for (const id of ids) next.delete(id)
+      for (const id of updatedIds) next.delete(id)
       return next
     })
     setConfirm(null)
     setConfirmText('')
-    setToast({
-      type: 'success',
-      text: hidden
-        ? `Hidden ${ids.length} record${ids.length === 1 ? '' : 's'} from the archive.`
-        : `Restored ${ids.length} record${ids.length === 1 ? '' : 's'} to the archive.`,
-    })
+
+    if (updatedIds.size === 0) {
+      setToast({
+        type: 'danger',
+        text: `Nothing was ${hidden ? 'hidden' : 'restored'}. ${RLS_UPDATE_HINT}`,
+      })
+      return
+    }
+
+    if (blocked.length > 0) {
+      setToast({
+        type: 'warning',
+        text: `${hidden ? 'Hid' : 'Restored'} ${updatedIds.size} of ${
+          ids.length
+        }. ${blocked.length} were blocked by the database. ${RLS_UPDATE_HINT}`,
+      })
+    } else {
+      setToast({
+        type: 'success',
+        text: hidden
+          ? `Hidden ${updatedIds.size} record${updatedIds.size === 1 ? '' : 's'} from the archive.`
+          : `Restored ${updatedIds.size} record${updatedIds.size === 1 ? '' : 's'} to the archive.`,
+      })
+    }
   }
 
   const confirmCopy = (() => {
@@ -365,7 +428,8 @@ export default function ArchivedPage() {
   const canConfirm =
     !!confirm &&
     !busy &&
-    (!confirmCopy?.requireTyping || confirmText.trim().toUpperCase() === 'DELETE')
+    (!confirmCopy?.requireTyping ||
+      confirmText.trim().toUpperCase() === 'DELETE')
 
   return (
     <AppLayout navItems={ADMIN_NAV}>
@@ -385,9 +449,7 @@ export default function ArchivedPage() {
 
           <div className="d-flex align-items-center gap-2 flex-wrap">
             <span className="badge bg-secondary fs-6">
-              {loading
-                ? '…'
-                : `${total} shown · ${hiddenCount} hidden`}
+              {loading ? '…' : `${total} shown · ${hiddenCount} hidden`}
             </span>
             <button
               type="button"
@@ -404,7 +466,9 @@ export default function ArchivedPage() {
         {error && (
           <div className="alert alert-danger d-flex align-items-start gap-2">
             <i className="bi bi-exclamation-triangle mt-1" />
-            <div className="flex-grow-1">{error}</div>
+            <div className="flex-grow-1" style={{ whiteSpace: 'pre-wrap' }}>
+              {error}
+            </div>
             <button
               type="button"
               className="btn btn-sm btn-outline-danger"
@@ -416,10 +480,32 @@ export default function ArchivedPage() {
           </div>
         )}
 
+        {hideSupported === false && (
+          <div className="alert alert-warning d-flex align-items-start gap-2">
+            <i className="bi bi-info-circle mt-1" />
+            <div className="flex-grow-1">
+              <div className="fw-semibold">
+                “Hide” is disabled — the database column is missing.
+              </div>
+              <div className="small mt-1">
+                Permanent delete works. To enable hide/restore, run this in the
+                Supabase SQL Editor once:
+              </div>
+              <pre className="small mb-0 mt-2 p-2 bg-white border rounded">
+                {HIDDEN_COLUMN_SQL}
+              </pre>
+            </div>
+          </div>
+        )}
+
         {toast && (
           <div
             className={`alert ${
-              toast.type === 'success' ? 'alert-success' : 'alert-danger'
+              toast.type === 'success'
+                ? 'alert-success'
+                : toast.type === 'warning'
+                  ? 'alert-warning'
+                  : 'alert-danger'
             } d-flex align-items-start gap-2`}
             role="status"
           >
@@ -427,10 +513,14 @@ export default function ArchivedPage() {
               className={`bi ${
                 toast.type === 'success'
                   ? 'bi-check-circle'
-                  : 'bi-exclamation-triangle'
+                  : toast.type === 'warning'
+                    ? 'bi-info-circle'
+                    : 'bi-exclamation-triangle'
               } mt-1`}
             />
-            <div className="flex-grow-1">{toast.text}</div>
+            <div className="flex-grow-1" style={{ whiteSpace: 'pre-wrap' }}>
+              {toast.text}
+            </div>
             <button
               type="button"
               className="btn-close"
@@ -484,7 +574,7 @@ export default function ArchivedPage() {
                   setShowHidden(e.target.checked)
                   clearSelection()
                 }}
-                disabled={loading}
+                disabled={loading || hideSupported === false}
               />
               <label
                 className="form-check-label"
@@ -601,12 +691,14 @@ export default function ArchivedPage() {
                 type="button"
                 className="btn btn-sm btn-soft"
                 onClick={() =>
-                  openConfirm(
-                    showHidden ? 'unhide' : 'hide',
-                    selectedIdsList,
-                  )
+                  openConfirm(showHidden ? 'unhide' : 'hide', selectedIdsList)
                 }
-                disabled={busy}
+                disabled={busy || hideSupported === false}
+                title={
+                  hideSupported === false
+                    ? 'Hidden column missing — see the banner above'
+                    : undefined
+                }
               >
                 <i
                   className={`bi ${
@@ -651,6 +743,7 @@ export default function ArchivedPage() {
                 type="button"
                 className="btn btn-sm btn-link p-0"
                 onClick={() => setShowHidden(true)}
+                disabled={hideSupported === false}
               >
                 {hiddenCount} hidden — show
               </button>
@@ -776,9 +869,11 @@ export default function ArchivedPage() {
                               type="button"
                               className="btn btn-soft"
                               title={
-                                hidden
-                                  ? 'Restore to archive'
-                                  : 'Hide from archive'
+                                hideSupported === false
+                                  ? 'Hidden column missing'
+                                  : hidden
+                                    ? 'Restore to archive'
+                                    : 'Hide from archive'
                               }
                               aria-label={
                                 hidden
@@ -786,12 +881,9 @@ export default function ArchivedPage() {
                                   : 'Hide from archive'
                               }
                               onClick={() =>
-                                openConfirm(
-                                  hidden ? 'unhide' : 'hide',
-                                  [a.id],
-                                )
+                                openConfirm(hidden ? 'unhide' : 'hide', [a.id])
                               }
-                              disabled={busy}
+                              disabled={busy || hideSupported === false}
                             >
                               <i
                                 className={`bi ${
@@ -947,25 +1039,20 @@ export default function ArchivedPage() {
         .summary-table .status-col.active {
           background: rgba(0, 86, 179, 0.12);
         }
-        .summary-table td {
-          vertical-align: middle;
-        }
+        .summary-table td { vertical-align: middle; }
+
         .deleted-row {
           background: #fafafa !important;
           opacity: 0.8;
         }
-        .deleted-row:hover {
-          background: #f5f5f5 !important;
-        }
+        .deleted-row:hover { background: #f5f5f5 !important; }
+
         .hidden-row {
           background: #f1f3f5 !important;
           opacity: 0.55;
         }
-        .hidden-row:hover {
-          background: #eceff1 !important;
-        }
+        .hidden-row:hover { background: #eceff1 !important; }
 
-        /* ── Confirmation dialog ── */
         .confirm-backdrop {
           position: fixed;
           inset: 0;
@@ -993,9 +1080,7 @@ export default function ArchivedPage() {
           padding: 1rem 1.25rem;
           border-bottom: 1px solid #e9ecef;
         }
-        .confirm-body {
-          padding: 1.25rem;
-        }
+        .confirm-body { padding: 1.25rem; }
         .confirm-footer {
           display: flex;
           justify-content: flex-end;
@@ -1005,10 +1090,7 @@ export default function ArchivedPage() {
           background: #f8fafc;
           border-radius: 0 0 0.75rem 0.75rem;
         }
-        @keyframes confirmFade {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
+        @keyframes confirmFade { from { opacity: 0; } to { opacity: 1; } }
         @keyframes confirmPop {
           from { opacity: 0; transform: translateY(8px) scale(0.98); }
           to { opacity: 1; transform: translateY(0) scale(1); }
