@@ -6,22 +6,26 @@ export default function PendingPage() {
   const { profile, refreshProfile } = useAuth()
   const [checking, setChecking] = useState(false)
 
-  // Log once so you can see the exact shape of the row
+  // Log once so you can confirm the shape in the console
   console.log('PendingPage profile:', profile)
 
-  // 🔑 Kick out as soon as admin approves or rejects
-  if (profile?.status === 'approved') {
+  // 🔑 Route away based on the real field name
+  if (profile?.verification_status === 'approved') {
     return <Navigate to="/dashboard" replace />
   }
 
-  if (profile?.status === 'rejected') {
+  if (profile?.verification_status === 'rejected') {
     return <Navigate to="/rejected" replace />
+  }
+
+  if (profile?.verification_status === 'resubmit') {
+    return <Navigate to="/verify" replace />
   }
 
   async function handleRefresh() {
     setChecking(true)
     try {
-      await refreshProfile() // ← pulls fresh profile from Supabase, updates context
+      await refreshProfile() // ← updates context → re-renders → redirect fires
     } finally {
       setChecking(false)
     }
