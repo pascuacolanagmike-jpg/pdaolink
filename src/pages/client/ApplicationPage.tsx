@@ -88,6 +88,105 @@ const ASSISTANCE_TREE: AssistanceNode[] = [
   },
 ]
 
+// ─────────────────────────────────────────────────────────
+// Assistance source encoding
+//
+// Each entry in `assistance_received` / `assistance_needed` is a
+// text[] element encoded as "govt:<leafKey>" or "ngo:<leafKey>".
+// At most one entry per (source, top-level category) pair is stored.
+// ─────────────────────────────────────────────────────────
+type AssistanceSource = 'govt' | 'ngo'
+
+const SOURCES: AssistanceSource[] = ['govt', 'ngo']
+const SOURCE_LABEL: Record<AssistanceSource, string> = { govt: "Gov't", ngo: 'NGO' }
+const SOURCE_PREFIX: Record<AssistanceSource, string> = { govt: 'govt:', ngo: 'ngo:' }
+
+/** All leaf keys selected for a given source (prefix stripped). */
+function getAssistanceSelection(arr: string[] | undefined, source: AssistanceSource): string[] {
+  const prefix = SOURCE_PREFIX[source]
+  return (arr ?? [])
+    .filter((v): v is string => typeof v === 'string' && v.startsWith(prefix))
+    .map((v) => v.slice(prefix.length))
+}
+
+/** Top-level ancestor of a leaf key — used as the "slot" identifier. */
+function findTopLevelAncestor(
+  targetKey: string,
+  nodes: AssistanceNode[] = ASSISTANCE_TREE,
+  currentTop: string | null = null
+): string | null {
+  for (const node of nodes) {
+    const top = currentTop ?? node.key
+    if (node.key === targetKey) return top
+    if (node.children) {
+      const found = findTopLevelAncestor(targetKey, node.children, top)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+/**
+ * Toggle a leaf for a source. Only one leaf per top-level category can be
+ * selected per source; picking a different leaf in the same category replaces
+ * the previous one. Clicking the already-selected leaf clears it.
+ */
+function setAssistanceSelection(
+  arr: string[] | undefined,
+  source: AssistanceSource,
+  key: string
+): string[] {
+  const prefix = SOURCE_PREFIX[source]
+  const current = arr ?? []
+  const alreadySelected = current.includes(prefix + key)
+  const topKey = findTopLevelAncestor(key)
+
+  // Drop any existing entry for this source whose top-level category matches.
+  const filtered = current.filter((v) => {
+    if (typeof v !== 'string' || !v.startsWith(prefix)) return true
+    const existingKey = v.slice(prefix.length)
+    return findTopLevelAncestor(existingKey) !== topKey
+  })
+
+  if (alreadySelected) return filtered
+  return [...filtered, prefix + key]
+}
+
+function isAssistanceEntry(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    (value.startsWith(SOURCE_PREFIX.govt) || value.startsWith(SOURCE_PREFIX.ngo))
+  )
+}
+
+/** Keeps only well-formed agency-prefixed entries. */
+function normalizeAssist(arr: unknown): string[] {
+  if (!Array.isArray(arr)) return []
+  return arr.filter(isAssistanceEntry)
+}
+
+/** Resolve a leaf key to its human-readable label. */
+function findAssistanceLabel(key: string, nodes: AssistanceNode[] = ASSISTANCE_TREE): string {
+  for (const node of nodes) {
+    if (node.key === key) return node.label
+    if (node.children) {
+      const found = findAssistanceLabel(key, node.children)
+      if (found) return found
+    }
+  }
+  return ''
+}
+
+// ─────────────────────────────────────────────────────────
+// Locked LGU scope — Cauayan City, Isabela, Region 2
+// ─────────────────────────────────────────────────────────
+const LOCKED_MUNICIPALITY = 'Cauayan City'
+const LOCKED_PROVINCE = 'ISABELA'
+const LOCKED_REGION = 'Region 2'
+const LOCKED_INPUT_STYLE = { backgroundColor: '#eef2f7', cursor: 'not-allowed' } as const
+
+const SUFFIX_OPTIONS = ['', 'Jr.', 'Sr.', 'II', 'III', 'IV', 'V'] as const
+
 // helper: today's date in YYYY-MM-DD
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
@@ -97,7 +196,7 @@ const EMPTY: ApplicationInput = {
   date_applied: todayISO(),
   first_name: '', middle_name: '', last_name: '', suffix: '',
   birth_date: '', gender: '', civil_status: '', blood_type: '',
-  address: '', barangay: '', municipality: '', province: '', region: '',
+  address: '', barangay: '', municipality: LOCKED_MUNICIPALITY, province: LOCKED_PROVINCE, region: LOCKED_REGION,
   disability_types: [], disability_type: '',
   disability_cause_type: '', disability_cause_congenital: [], disability_cause_acquired: [],
   disability_cause_other_specify: '', disability_cause: '',
@@ -116,18 +215,22 @@ const EMPTY: ApplicationInput = {
   accomplished_by: 'Applicant', accomplished_last_name: '', accomplished_first_name: '', accomplished_middle_name: '',
   physician_name: '', physician_license_no: '',
   assistance_received: [], assistance_needed: [],
+  assistance_received_source: '', assistance_needed_source: '',
 }
 
 function toApplicationInput(app: Application): ApplicationInput {
   const result: any = { ...EMPTY }
   for (const key of Object.keys(EMPTY) as (keyof ApplicationInput)[]) {
     const value = (app as any)[key]
-    if (value !== null && value !== undefined) {
-      if (Array.isArray(value)) result[key] = value
-      else if (typeof value === 'string') result[key] = value
-      else result[key] = value
-    }
+    if (value !== null && value !== undefined) result[key] = value
   }
+  result.assistance_received = normalizeAssist(result.assistance_received)
+  result.assistance_needed = normalizeAssist(result.assistance_needed)
+  result.municipality = LOCKED_MUNICIPALITY
+  result.province = LOCKED_PROVINCE
+  result.region = LOCKED_REGION
+  result.assistance_received_source = ''
+  result.assistance_needed_source = ''
   return result
 }
 
@@ -138,8 +241,56 @@ type ArrayField =
   | 'disability_types'
   | 'disability_cause_congenital'
   | 'disability_cause_acquired'
-  | 'assistance_received'
-  | 'assistance_needed'
+
+type AssistanceField = 'assistance_received' | 'assistance_needed'
+
+// ─────────────────────────────────────────────────────────
+// Nominatim reverse geocode: lat/lng → barangay
+// ─────────────────────────────────────────────────────────
+interface NominatimAddress {
+  barangay?: string
+  quarter?: string
+  neighbourhood?: string
+  hamlet?: string
+  suburb?: string
+  village?: string
+  city_district?: string
+  town?: string
+  city?: string
+  municipality?: string
+  county?: string
+}
+
+interface ReverseGeocodeResult {
+  barangay: string
+  city: string
+}
+
+async function reverseGeocodeBarangay(lat: number, lng: number): Promise<ReverseGeocodeResult> {
+  const url =
+    `https://nominatim.openstreetmap.org/reverse?format=jsonv2` +
+    `&lat=${lat}&lon=${lng}&addressdetails=1&accept-language=en`
+
+  const res = await fetch(url, { headers: { Accept: 'application/json' } })
+  if (!res.ok) throw new Error(`Location lookup failed (${res.status})`)
+
+  const data = await res.json()
+  const a: NominatimAddress = data?.address ?? {}
+
+  const barangay =
+    a.barangay ||
+    a.quarter ||
+    a.neighbourhood ||
+    a.hamlet ||
+    a.suburb ||
+    a.village ||
+    a.city_district ||
+    ''
+
+  const city = a.city || a.town || a.municipality || a.county || ''
+
+  return { barangay: barangay.trim(), city: city.trim() }
+}
 
 export default function ApplicationPage() {
   const { profile } = useAuth()
@@ -157,6 +308,10 @@ export default function ApplicationPage() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [showOtherDisability, setShowOtherDisability] = useState(false)
+
+  // GPS state
+  const [locating, setLocating] = useState(false)
+  const [geoNote, setGeoNote] = useState<string | null>(null)
 
   useEffect(() => {
     if (!profile) return
@@ -193,9 +348,78 @@ export default function ApplicationPage() {
     })
   }
 
-  // derived: is this a renewal?
+  /** Slot-aware single-select per source. */
+  const selectAssistance = (
+    field: AssistanceField,
+    source: AssistanceSource,
+    key: string
+  ) => {
+    setForm((f) => ({
+      ...f,
+      [field]: setAssistanceSelection(f[field] as string[] | undefined, source, key),
+    }))
+  }
+
+  const clearAssistance = (field: AssistanceField, source: AssistanceSource) => {
+    setForm((f) => ({
+      ...f,
+      [field]: setAssistanceSelection(f[field] as string[] | undefined, source, '__clear_all__'),
+    }))
+  }
+
+  // ── GPS: get position → reverse geocode → fill barangay only ──
+  const handleUseLocation = () => {
+    setGeoNote(null)
+    if (!('geolocation' in navigator)) {
+      setGeoNote('Your browser does not support location services.')
+      return
+    }
+    setLocating(true)
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const { barangay, city } = await reverseGeocodeBarangay(
+            pos.coords.latitude,
+            pos.coords.longitude
+          )
+
+          if (!barangay) {
+            setGeoNote('We could not determine your barangay. Please type it in manually.')
+            return
+          }
+
+          setForm((f) => ({ ...f, barangay }))
+
+          const outsideScope = city && !city.toLowerCase().includes('cauayan')
+
+          setGeoNote(
+            outsideScope
+              ? `Barangay "${barangay}" applied — but your location appears to be outside ${LOCKED_MUNICIPALITY}. Please verify.`
+              : `Barangay "${barangay}" applied from your location. Please verify.`
+          )
+        } catch (err: any) {
+          setGeoNote(err?.message ?? 'Could not look up your location. Please fill in the barangay manually.')
+        } finally {
+          setLocating(false)
+        }
+      },
+      (err) => {
+        setLocating(false)
+        if (err.code === err.PERMISSION_DENIED) {
+          setGeoNote('Location permission denied. Please fill in the barangay manually.')
+        } else if (err.code === err.POSITION_UNAVAILABLE) {
+          setGeoNote('Location unavailable. Please fill in the barangay manually.')
+        } else if (err.code === err.TIMEOUT) {
+          setGeoNote('Location request timed out. Please try again.')
+        } else {
+          setGeoNote('Could not get your location. Please fill in the barangay manually.')
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    )
+  }
+
   const isRenewal = form.application_type === 'Renewal'
-  // PWD number editable ONLY when Renewal
   const pwdNumberDisabled = !isRenewal
 
   const handleSubmit = async (e: FormEvent) => {
@@ -204,6 +428,7 @@ export default function ApplicationPage() {
     const required: (keyof ApplicationInput)[] = [
       'first_name', 'last_name', 'birth_date', 'gender', 'civil_status',
       'address', 'mobile_no', 'email',
+      'physician_name', 'physician_license_no',
     ]
     for (const field of required) {
       const val = form[field]
@@ -223,17 +448,28 @@ export default function ApplicationPage() {
     setSubmitting(true)
     const isRevision = existing?.status === REVISION_STATUS
 
+    const payload: ApplicationInput = {
+      ...form,
+      municipality: LOCKED_MUNICIPALITY,
+      province: LOCKED_PROVINCE,
+      region: LOCKED_REGION,
+      assistance_received_source: '',
+      assistance_needed_source: '',
+      assistance_received: normalizeAssist(form.assistance_received),
+      assistance_needed: normalizeAssist(form.assistance_needed),
+    }
+
     let appId: string
     if (isRevision && existing) {
       const { error } = await supabase
         .from('applications')
-        .update({ ...form, status: 'Pending', remarks: '', last_updated: new Date().toISOString() })
+        .update({ ...payload, status: 'Pending', remarks: '', last_updated: new Date().toISOString() })
         .eq('id', existing.id)
       setSubmitting(false)
       if (error) { setError(error.message); return }
       appId = existing.id
     } else {
-      const { data, error } = await supabase.from('applications').insert(form).select().single()
+      const { data, error } = await supabase.from('applications').insert(payload).select().single()
       setSubmitting(false)
       if (error) { setError(error.message); return }
       appId = data.id
@@ -318,7 +554,6 @@ export default function ApplicationPage() {
                       setForm((f) => ({
                         ...f,
                         application_type: val,
-                        // clear PWD number when switching back to New Applicant
                         pwd_number: val === 'Renewal' ? f.pwd_number : '',
                       }))
                     }}
@@ -333,7 +568,7 @@ export default function ApplicationPage() {
                     onChange={(e) => set('pwd_number', e.target.value)}
                     placeholder={isRenewal ? 'DR-PPMNA-BBB-NNNNNNN' : '— select Renewal to enable —'}
                     disabled={pwdNumberDisabled}
-                    style={pwdNumberDisabled ? { backgroundColor: '#eef2f7', cursor: 'not-allowed' } : undefined}
+                    style={pwdNumberDisabled ? LOCKED_INPUT_STYLE : undefined}
                   />
                 </FormCol>
                 <FormCol md={4} label="Date applied">
@@ -342,7 +577,7 @@ export default function ApplicationPage() {
                     className="form-control"
                     value={form.date_applied ?? ''}
                     readOnly
-                    style={{ backgroundColor: '#eef2f7', cursor: 'not-allowed' }}
+                    style={LOCKED_INPUT_STYLE}
                   />
                 </FormCol>
               </div>
@@ -359,8 +594,16 @@ export default function ApplicationPage() {
                 <FormCol md={3} label="Middle name">
                   <input className="form-control" value={form.middle_name ?? ''} onChange={(e) => set('middle_name', e.target.value)} />
                 </FormCol>
-                <FormCol md={2} label="Suffix">
-                  <input className="form-control" value={form.suffix ?? ''} onChange={(e) => set('suffix', e.target.value)} placeholder="Jr., Sr." />
+                <FormCol md={3} label="Suffix">
+                  <select
+                    className="form-select"
+                    value={form.suffix ?? ''}
+                    onChange={(e) => set('suffix', e.target.value)}
+                  >
+                    {SUFFIX_OPTIONS.map((s) => (
+                      <option key={s || 'none'} value={s}>{s || 'None'}</option>
+                    ))}
+                  </select>
                 </FormCol>
               </div>
             </FormCard>
@@ -392,21 +635,49 @@ export default function ApplicationPage() {
             </FormCard>
 
             <FormCard icon="bi-geo-alt" title="Address">
+              <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+                <button
+                  type="button"
+                  className="btn btn-soft btn-sm"
+                  onClick={handleUseLocation}
+                  disabled={locating}
+                >
+                  {locating ? (
+                    <><span className="spinner-border spinner-border-sm me-1" /> Getting location…</>
+                  ) : (
+                    <><i className="bi bi-geo-alt-fill me-1" /> Use my current location</>
+                  )}
+                </button>
+                <span className="text-muted small">
+                  Fills in your barangay only — you can still type it manually.
+                </span>
+              </div>
+              {geoNote && (
+                <div className="small mb-2" style={{ color: '#0056b3' }}>
+                  <i className="bi bi-info-circle me-1" />
+                  {geoNote}
+                </div>
+              )}
               <div className="row g-3">
                 <FormCol md={12} label="House no./Street/Purok" required>
                   <input className="form-control" value={form.address ?? ''} onChange={(e) => set('address', e.target.value)} required />
                 </FormCol>
-                <FormCol md={3} label="Barangay">
-                  <input className="form-control" value={form.barangay ?? ''} onChange={(e) => set('barangay', e.target.value)} />
+                <FormCol md={6} label="Barangay">
+                  <input
+                    className="form-control"
+                    value={form.barangay ?? ''}
+                    onChange={(e) => set('barangay', e.target.value)}
+                    placeholder="Type or use your current location"
+                  />
                 </FormCol>
-                <FormCol md={3} label="Municipality/City">
-                  <input className="form-control" value={form.municipality ?? ''} onChange={(e) => set('municipality', e.target.value)} />
+                <FormCol md={6} label="Municipality/City">
+                  <input className="form-control" value={LOCKED_MUNICIPALITY} disabled readOnly style={LOCKED_INPUT_STYLE} />
                 </FormCol>
-                <FormCol md={3} label="Province">
-                  <input className="form-control" value={form.province ?? ''} onChange={(e) => set('province', e.target.value)} />
+                <FormCol md={6} label="Province">
+                  <input className="form-control" value={LOCKED_PROVINCE} disabled readOnly style={LOCKED_INPUT_STYLE} />
                 </FormCol>
-                <FormCol md={3} label="Region">
-                  <input className="form-control" value={form.region ?? ''} onChange={(e) => set('region', e.target.value)} />
+                <FormCol md={6} label="Region">
+                  <input className="form-control" value={LOCKED_REGION} disabled readOnly style={LOCKED_INPUT_STYLE} />
                 </FormCol>
               </div>
             </FormCard>
@@ -438,6 +709,7 @@ export default function ApplicationPage() {
                     checked={form.disability_cause_type === 'Congenital / Inborn'}
                     onChange={() => set('disability_cause_type', 'Congenital / Inborn')}
                     radio
+                    name="disability-cause-type"
                   />
                 </div>
                 <div className="col-md-6">
@@ -446,6 +718,7 @@ export default function ApplicationPage() {
                     checked={form.disability_cause_type === 'Acquired'}
                     onChange={() => set('disability_cause_type', 'Acquired')}
                     radio
+                    name="disability-cause-type"
                   />
                 </div>
               </div>
@@ -595,8 +868,6 @@ export default function ApplicationPage() {
               </div>
             </FormCard>
 
-            {/* Representative Information section REMOVED */}
-
             <FormCard icon="bi-card-checklist" title="Government ID Numbers" subtitle="Provide any government-issued ID">
               <div className="row g-3">
                 <FormCol md={4} label="PWD ID No. (if any)"><input className="form-control" value={form.pwd_id_number ?? ''} onChange={(e) => set('pwd_id_number', e.target.value)} /></FormCol>
@@ -621,71 +892,41 @@ export default function ApplicationPage() {
 
             <FormCard icon="bi-person-doctor" title="Certifying Physician">
               <div className="row g-3">
-                <FormCol md={8} label="Physician's name"><input className="form-control" value={form.physician_name ?? ''} onChange={(e) => set('physician_name', e.target.value)} /></FormCol>
-                <FormCol md={4} label="License No."><input className="form-control" value={form.physician_license_no ?? ''} onChange={(e) => set('physician_license_no', e.target.value)} /></FormCol>
+                <FormCol md={8} label="Physician's name" required>
+                  <input className="form-control" value={form.physician_name ?? ''} onChange={(e) => set('physician_name', e.target.value)} required />
+                </FormCol>
+                <FormCol md={4} label="License No." required>
+                  <input className="form-control" value={form.physician_license_no ?? ''} onChange={(e) => set('physician_license_no', e.target.value)} required />
+                </FormCol>
               </div>
             </FormCard>
 
-            {/* ───────── Section 22: Assistance Received / Needed ───────── */}
+            {/* ───────── Section 22: Assistance Received / Needed / Rehabilitation ───────── */}
             <FormCard
               icon="bi-clipboard2-heart"
               title="Assistance Received / Needed / Rehabilitation"
-              subtitle="Check all that apply. Click a category to expand its options."
+              subtitle="Select one item per category, per agency. Gov't and NGO are independent — you may pick one item in each category for each agency."
             >
               <div className="row g-4">
-                {/* RECEIVED column */}
-                <div className="col-md-6">
-                  <div className="assistance-col-header received">
-                    <i className="bi bi-box-arrow-in-down" />
-                    <span>Received</span>
-                  </div>
-
-                  <div className="assistance-source mb-3">
-                    <span className="text-muted small me-2">Source:</span>
-                    <CheckboxRow
-                      label="Gov't"
-                      checked={form.assistance_received?.includes('govt') ?? false}
-                      onChange={() => toggleArray('assistance_received', 'govt')}
-                    />
-                    <CheckboxRow
-                      label="NGO"
-                      checked={form.assistance_received?.includes('ngo') ?? false}
-                      onChange={() => toggleArray('assistance_received', 'ngo')}
-                    />
-                  </div>
-
-                  <AssistanceTree
-                    nodes={ASSISTANCE_TREE}
+                <div className="col-lg-6">
+                  <AssistanceColumn
+                    title="Received"
+                    icon="bi-box-arrow-in-down"
+                    variant="received"
                     values={form.assistance_received ?? []}
-                    onToggle={(k) => toggleArray('assistance_received', k)}
+                    onSelect={(source, key) => selectAssistance('assistance_received', source, key)}
+                    onClear={(source) => clearAssistance('assistance_received', source)}
                   />
                 </div>
 
-                {/* NEEDED column */}
-                <div className="col-md-6">
-                  <div className="assistance-col-header needed">
-                    <i className="bi bi-hand-index-thumb" />
-                    <span>Needed</span>
-                  </div>
-
-                  <div className="assistance-source mb-3">
-                    <span className="text-muted small me-2">Source:</span>
-                    <CheckboxRow
-                      label="Gov't"
-                      checked={form.assistance_needed?.includes('govt') ?? false}
-                      onChange={() => toggleArray('assistance_needed', 'govt')}
-                    />
-                    <CheckboxRow
-                      label="NGO"
-                      checked={form.assistance_needed?.includes('ngo') ?? false}
-                      onChange={() => toggleArray('assistance_needed', 'ngo')}
-                    />
-                  </div>
-
-                  <AssistanceTree
-                    nodes={ASSISTANCE_TREE}
+                <div className="col-lg-6">
+                  <AssistanceColumn
+                    title="Needed"
+                    icon="bi-hand-index-thumb"
+                    variant="needed"
                     values={form.assistance_needed ?? []}
-                    onToggle={(k) => toggleArray('assistance_needed', k)}
+                    onSelect={(source, key) => selectAssistance('assistance_needed', source, key)}
+                    onClear={(source) => clearAssistance('assistance_needed', source)}
                   />
                 </div>
               </div>
@@ -723,7 +964,6 @@ export default function ApplicationPage() {
         .form-official-subtitle { font-size: 0.82rem; opacity: 0.8; margin-bottom: 0; color: #fff; }
         .form-subgroup-label { font-weight: 700; font-size: 0.85rem; color: #0056b3; margin-bottom: 0.2rem; text-transform: uppercase; letter-spacing: 0.5px; }
 
-        /* Bold field labels (dropdown / input headers) */
         .form-label { font-weight: 700; font-size: 0.85rem; color: #1a2a44; }
 
         .checkbox-row {
@@ -735,9 +975,7 @@ export default function ApplicationPage() {
         .checkbox-row:hover { border-color: #b8d4f0; background: #f5f9ff; }
         .checkbox-row.checked { border-color: #0056b3; background: rgba(0, 86, 179, 0.06); }
         .checkbox-row input { width: 16px; height: 16px; cursor: pointer; margin: 0; }
-        .assistance-source .checkbox-row { display: inline-flex; }
 
-        /* ── Assistance section ── */
         .assistance-col-header {
           display: flex;
           align-items: center;
@@ -761,7 +999,75 @@ export default function ApplicationPage() {
           border-left: 4px solid #b02a37;
         }
 
-        /* Dropdown toggle for parent assistance nodes */
+        .source-tabs {
+          display: inline-flex;
+          gap: 0.25rem;
+          padding: 0.25rem;
+          background: #eef2f7;
+          border-radius: 0.5rem;
+        }
+        .source-tab {
+          display: inline-flex;
+          align-items: center;
+          border: none;
+          background: transparent;
+          padding: 0.35rem 1rem;
+          border-radius: 0.35rem;
+          font-size: 0.85rem;
+          font-weight: 700;
+          color: #5a6b85;
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        .source-tab:hover { color: #0056b3; }
+        .source-tab.active {
+          background: #fff;
+          color: #0056b3;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+        }
+        .source-tab .source-count {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 1.2rem;
+          height: 1.2rem;
+          padding: 0 0.35rem;
+          border-radius: 999px;
+          background: #0056b3;
+          color: #fff;
+          font-size: 0.7rem;
+          margin-left: 0.4rem;
+        }
+        .source-tab.active .source-count { background: #0056b3; }
+
+        .assistance-selection { min-height: 1.25rem; }
+        .assistance-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+        .assistance-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.35rem;
+          padding: 0.25rem 0.6rem;
+          background: #f1f7ff;
+          border: 1px solid #c7dcf5;
+          border-radius: 999px;
+          font-size: 0.78rem;
+          color: #0056b3;
+        }
+        .assistance-chip .chip-cat {
+          font-weight: 700;
+        }
+        .assistance-chip .chip-sep { color: #8fb3dc; }
+        .assistance-chip .chip-x {
+          border: none;
+          background: transparent;
+          color: #0056b3;
+          font-size: 0.85rem;
+          line-height: 1;
+          padding: 0;
+          cursor: pointer;
+        }
+        .assistance-chip .chip-x:hover { color: #b02a37; }
+
         .assistance-toggle {
           display: flex;
           align-items: center;
@@ -786,18 +1092,17 @@ export default function ApplicationPage() {
           border-bottom-left-radius: 0;
           border-bottom-right-radius: 0;
         }
+        .assistance-toggle.checked {
+          border-color: #0056b3;
+          background: rgba(0, 86, 179, 0.06);
+        }
         .assistance-caret {
           font-size: 0.8rem;
           color: #0056b3;
           transition: transform 0.15s ease;
         }
         .assistance-toggle-label { flex: 1; }
-        .assistance-toggle-check { display: inline-flex; align-items: center; }
-        .assistance-toggle-check input {
-          width: 16px; height: 16px; cursor: pointer; margin: 0;
-        }
 
-        /* Children container */
         .assistance-dropdown {
           border: 1px solid #0056b3;
           border-top: none;
@@ -835,32 +1140,158 @@ function FormCol({ md, label, required, children }: { md: number; label: string;
   )
 }
 
-function CheckboxRow({ label, checked, onChange, radio }: { label: string; checked: boolean; onChange: () => void; radio?: boolean }) {
+function CheckboxRow({
+  label,
+  checked,
+  onChange,
+  radio,
+  name,
+}: {
+  label: string
+  checked: boolean
+  onChange: () => void
+  radio?: boolean
+  name?: string
+}) {
   return (
     <label className={`checkbox-row ${checked ? 'checked' : ''}`}>
-      <input type={radio ? 'radio' : 'checkbox'} checked={checked} onChange={onChange} />
+      <input type={radio ? 'radio' : 'checkbox'} name={name} checked={checked} onChange={onChange} />
       <span>{label}</span>
     </label>
   )
 }
 
-// ─────────── AssistanceTree — MODIFIED (required for dropdown + multi-select) ───────────
+// ─────────── Assistance column (one per "Received" / "Needed") ───────────
+
+function AssistanceColumn({
+  title,
+  icon,
+  variant,
+  values,
+  onSelect,
+  onClear,
+}: {
+  title: string
+  icon: string
+  variant: 'received' | 'needed'
+  values: string[]
+  onSelect: (source: AssistanceSource, key: string) => void
+  onClear: (source: AssistanceSource) => void
+}) {
+  const [source, setSource] = useState<AssistanceSource>('govt')
+
+  const selectedKeys = getAssistanceSelection(values, source)
+  const countFor = (s: AssistanceSource) => getAssistanceSelection(values, s).length
+
+  const removeOne = (key: string) => onSelect(source, key) // re-selecting toggles it off
+
+  const labelFor = (key: string) => findAssistanceLabel(key)
+  const slotLabelFor = (key: string) => {
+    const top = findTopLevelAncestor(key)
+    return top ? findAssistanceLabel(top) : ''
+  }
+
+  return (
+    <div className="assistance-column">
+      <div className={`assistance-col-header ${variant}`}>
+        <i className={`bi ${icon}`} />
+        <span>{title}</span>
+      </div>
+
+      <div className="source-tabs mb-3" role="tablist" aria-label={`${title} — assistance source`}>
+        {SOURCES.map((s) => {
+          const active = source === s
+          const count = countFor(s)
+          return (
+            <button
+              key={s}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              className={`source-tab ${active ? 'active' : ''}`}
+              onClick={() => setSource(s)}
+            >
+              <span>{SOURCE_LABEL[s]}</span>
+              {count > 0 && <span className="source-count" aria-label={`${count} selected`}>{count}</span>}
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="assistance-selection mb-2">
+        {selectedKeys.length > 0 ? (
+          <>
+            <div className="d-flex justify-content-between align-items-center mb-1">
+              <span className="text-muted small">Selected for {SOURCE_LABEL[source]}:</span>
+              <button
+                type="button"
+                className="btn btn-link btn-sm p-0"
+                onClick={() => onClear(source)}
+              >
+                Clear all
+              </button>
+            </div>
+            <div className="assistance-chips">
+              {selectedKeys.map((key) => (
+                <span key={key} className="assistance-chip">
+                  <span className="chip-cat">{slotLabelFor(key)}</span>
+                  <span className="chip-sep">·</span>
+                  <span>{labelFor(key)}</span>
+                  <button
+                    type="button"
+                    className="chip-x"
+                    aria-label={`Remove ${labelFor(key)}`}
+                    onClick={() => removeOne(key)}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          </>
+        ) : (
+          <span className="text-muted small">
+            No items selected for {SOURCE_LABEL[source]}. Choose one per category below.
+          </span>
+        )}
+      </div>
+
+      <AssistanceTree
+        nodes={ASSISTANCE_TREE}
+        values={selectedKeys}
+        onSelect={(key) => onSelect(source, key)}
+        name={`assistance-${variant}-${source}`}
+      />
+    </div>
+  )
+}
+
+// ─────────── Assistance tree (single-select per top-level category) ───────────
 
 function AssistanceTree({
   nodes,
   values,
-  onToggle,
+  onSelect,
+  name,
   depth = 0,
+  topKey,
 }: {
   nodes: AssistanceNode[]
   values: string[]
-  onToggle: (key: string) => void
+  onSelect: (key: string) => void
+  name: string
   depth?: number
+  topKey?: string
 }) {
   const [open, setOpen] = useState<Record<string, boolean>>({})
 
   const toggleOpen = (key: string) =>
     setOpen((o) => ({ ...o, [key]: !o[key] }))
+
+  const hasAnySelected = (node: AssistanceNode): boolean => {
+    if (values.includes(node.key)) return true
+    return !!node.children?.some(hasAnySelected)
+  }
 
   return (
     <div className={depth > 0 ? 'assistance-children' : ''}>
@@ -868,17 +1299,22 @@ function AssistanceTree({
         const hasChildren = !!node.children?.length
         const isOpen = !!open[node.key]
         const isChecked = values.includes(node.key)
+        const childSelected = hasChildren && hasAnySelected(node)
+        // The top-level key this node belongs to (its own key if depth 0).
+        const nodeTopKey = topKey ?? node.key
+        // Radio group name is unique per (source, variant, top-level category).
+        const groupName = `${name}__${nodeTopKey}`
 
         return (
           <div key={node.key} className="assistance-node mb-1">
             {hasChildren ? (
               <>
-                {/* clickable dropdown header */}
                 <div
-                  className={`assistance-toggle ${isOpen ? 'open' : ''}`}
+                  className={`assistance-toggle ${isOpen ? 'open' : ''} ${childSelected ? 'checked' : ''}`}
                   onClick={() => toggleOpen(node.key)}
                   role="button"
                   tabIndex={0}
+                  aria-expanded={isOpen}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault()
@@ -888,29 +1324,25 @@ function AssistanceTree({
                 >
                   <i className={`bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'} assistance-caret`} />
                   <span className="assistance-toggle-label">{node.label}</span>
-
-                  {/* selectable parent checkbox — stops the dropdown toggle */}
-                  <span
-                    className="assistance-toggle-check"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      onChange={() => onToggle(node.key)}
-                      aria-label={`Select ${node.label}`}
+                  {childSelected && (
+                    <i
+                      className="bi bi-check-circle-fill"
+                      style={{ color: '#0056b3', fontSize: '0.9rem' }}
+                      title="One item selected in this category"
+                      aria-hidden="true"
                     />
-                  </span>
+                  )}
                 </div>
 
-                {/* children shown when open */}
                 {isOpen && (
                   <div className="assistance-dropdown">
                     <AssistanceTree
                       nodes={node.children!}
                       values={values}
-                      onToggle={onToggle}
+                      onSelect={onSelect}
+                      name={name}
                       depth={depth + 1}
+                      topKey={nodeTopKey}
                     />
                   </div>
                 )}
@@ -918,8 +1350,10 @@ function AssistanceTree({
             ) : (
               <CheckboxRow
                 label={node.label}
+                radio
+                name={groupName}
                 checked={isChecked}
-                onChange={() => onToggle(node.key)}
+                onChange={() => onSelect(node.key)}
               />
             )}
           </div>

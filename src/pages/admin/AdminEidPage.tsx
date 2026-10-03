@@ -194,7 +194,7 @@ export default function AdminEidPage() {
             return
           }
 
-          // If status moved out of the E-ID-eligible range, remove
+          // If status moved out of the PRINT-ID-eligible range, remove
           if (app.status !== 'Approved' && app.status !== 'Ready for Pickup') {
             setApplicants((prev) =>
               prev.filter((a) => a.application.id !== app.id)
@@ -296,7 +296,7 @@ export default function AdminEidPage() {
       prev ? { ...prev, application: updatedApp } : prev
     )
     setEditMode(false)
-    setSaveSuccess('E-ID information updated.')
+    setSaveSuccess('PRINT-ID information updated.')
   }
 
   // --- Admin photo upload (auto-approved) ---
@@ -374,8 +374,8 @@ export default function AdminEidPage() {
     const count = selectedIds.length
     if (
       !window.confirm(
-        `Archive ${count} selected E-ID record${count === 1 ? '' : 's'}?\n\n` +
-          `They will be hidden from E-ID Management but kept in the Archived page for record-keeping.`
+        `Archive ${count} selected PRINT-ID record${count === 1 ? '' : 's'}?\n\n` +
+          `They will be hidden from PRINT-ID Management but kept in the Archived page for record-keeping.`
       )
     )
       return
@@ -408,7 +408,7 @@ export default function AdminEidPage() {
         `${count} record${count === 1 ? '' : 's'} archived successfully.`
       )
     } catch (err: any) {
-      console.error('[E-ID] archive failed:', err)
+      console.error('[PRINT-ID] archive failed:', err)
       setDeleteError(err.message || 'Failed to archive selected records.')
     } finally {
       setDeleting(false)
@@ -430,10 +430,10 @@ export default function AdminEidPage() {
       <div className="fade-in-up">
         <div className="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-2">
           <div>
-            <h3 className="mb-1">E-ID Management</h3>
+            <h3 className="mb-1">PRINT-ID Management</h3>
             <p className="text-muted mb-0">
               {applicants.length} approved applicant
-              {applicants.length !== 1 ? 's' : ''} with generated E-ID cards
+              {applicants.length !== 1 ? 's' : ''} with generated PRINT-ID cards
             </p>
           </div>
           <div className="d-flex align-items-center gap-2">
@@ -494,7 +494,7 @@ export default function AdminEidPage() {
               <i className="bi bi-card-text d-block mb-2" />
               <p className="mb-0">
                 {applicants.length === 0
-                  ? 'No approved applicants yet. E-ID cards are generated automatically when an application is approved.'
+                  ? 'No approved applicants yet. PRINT-ID cards are generated automatically when an application is approved.'
                   : 'No applicants match your search.'}
               </p>
             </div>
@@ -563,7 +563,7 @@ export default function AdminEidPage() {
                           className="btn btn-sm btn-primary"
                           onClick={() => openCard(a)}
                         >
-                          <i className="bi bi-card-text me-1" /> View E-ID
+                          <i className="bi bi-card-text me-1" /> View PRINT-ID
                         </button>
                       </td>
                     </tr>
@@ -591,7 +591,7 @@ export default function AdminEidPage() {
               <div className="modal-content border-0 shadow">
                 <div className="modal-header no-print">
                   <h5 className="modal-title">
-                    E-ID — {appFullName(selected.application)}
+                    PRINT-ID — {appFullName(selected.application)}
                   </h5>
                   <div className="d-flex gap-2">
                     {!editMode && (
@@ -600,7 +600,7 @@ export default function AdminEidPage() {
                           className="btn btn-sm btn-soft"
                           onClick={() => photoInput.current?.click()}
                           disabled={photoUploading}
-                          title="Upload or replace the E-ID photo"
+                          title="Upload or replace the PRINT-ID photo"
                         >
                           {photoUploading ? (
                             <>
@@ -668,7 +668,7 @@ export default function AdminEidPage() {
                       <p className="text-muted small mb-3">
                         <i className="bi bi-info-circle me-1" />
                         Correct any wrong information captured from the
-                        applicant's form. Changes update the E-ID immediately.
+                        applicant's form. Changes update the PRINT-ID immediately.
                       </p>
                       <div className="row g-2">
                         <div className="col-md-4">

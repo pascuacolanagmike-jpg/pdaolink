@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@emailjs/browser": "^4.4.1",
     "@supabase/supabase-js": "^2.45.4",
     "bootstrap": "^5.3.3",
     "bootstrap-icons": "^1.11.3",

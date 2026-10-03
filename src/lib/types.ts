@@ -230,8 +230,11 @@ export interface Application {
   // Section 21 - Physician
   physician_name: string | null
   physician_license_no: string | null
+  // Section 22 - Assistance
   assistance_received: string[] | null
   assistance_needed: string[] | null
+  assistance_received_source: string | null
+  assistance_needed_source: string | null
 }
 
 export interface ApplicationInput {
@@ -303,9 +306,12 @@ export interface ApplicationInput {
   accomplished_first_name?: string
   accomplished_middle_name?: string
   physician_name?: string
+  physician_license_no?: string
+  // Section 22 - Assistance
   assistance_received?: string[]
   assistance_needed?: string[]
-  physician_license_no?: string
+  assistance_received_source?: string
+  assistance_needed_source?: string
 }
 
 // ============================================================

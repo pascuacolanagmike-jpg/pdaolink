@@ -14,3 +14,8 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     detectSessionInUrl: true,
   },
 })
+
+// Expose for debugging in DevTools (safe — anon key is already public)
+if (typeof window !== 'undefined') {
+  ;(window as any).supabase = supabase
+}

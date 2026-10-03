@@ -1,4 +1,4 @@
-import { useState, FormEvent } from 'react'
+import { useState, FormEvent, useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../lib/auth'
 import Alert from '../../components/Alert'
@@ -20,12 +20,25 @@ export default function RegisterPage() {
   // New state for password visibility
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [passwordFocused, setPasswordFocused] = useState(false)
+
+  // Password requirement checks
+  const passwordChecks = useMemo(() => ({
+    minLength: password.length >= 8,
+    hasUppercase: /[A-Z]/.test(password),
+    hasLowercase: /[a-z]/.test(password),
+    hasNumber: /[0-9]/.test(password),
+    hasSpecial: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]/.test(password),
+  }), [password])
+
+  const allPasswordChecksPassed = Object.values(passwordChecks).every(Boolean)
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setError(null)
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters.')
+
+    if (!allPasswordChecksPassed) {
+      setError('Please meet all password requirements.')
       return
     }
     if (password !== confirm) {
@@ -41,6 +54,13 @@ export default function RegisterPage() {
       setShowZeroTrust(true)
     }
   }
+
+  const RequirementItem = ({ met, label }: { met: boolean; label: string }) => (
+    <div className={`d-flex align-items-center gap-2 requirement-item ${met ? 'met' : ''}`}>
+      <i className={`bi ${met ? 'bi-check-circle-fill text-success' : 'bi-circle text-muted'}`} />
+      <span className={met ? 'text-success' : 'text-muted'}>{label}</span>
+    </div>
+  )
 
   return (
     <div className="container">
@@ -89,9 +109,11 @@ export default function RegisterPage() {
                     <div className="position-relative">
                       <input
                         type={showPassword ? 'text' : 'password'}
-                        className="form-control pe-5"
+                        className={`form-control pe-5 ${password && !allPasswordChecksPassed ? 'is-invalid' : ''} ${password && allPasswordChecksPassed ? 'is-valid' : ''}`}
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
+                        onFocus={() => setPasswordFocused(true)}
+                        onBlur={() => setPasswordFocused(false)}
                         required
                         minLength={8}
                         placeholder="Min 8 characters"
@@ -112,7 +134,7 @@ export default function RegisterPage() {
                     <div className="position-relative">
                       <input
                         type={showConfirmPassword ? 'text' : 'password'}
-                        className="form-control pe-5"
+                        className={`form-control pe-5 ${confirm && password !== confirm ? 'is-invalid' : ''} ${confirm && password === confirm && allPasswordChecksPassed ? 'is-valid' : ''}`}
                         value={confirm}
                         onChange={(e) => setConfirm(e.target.value)}
                         required
@@ -128,10 +150,34 @@ export default function RegisterPage() {
                         <i className={`bi ${showConfirmPassword ? 'bi-eye-slash' : 'bi-eye'}`} />
                       </button>
                     </div>
+                    {confirm && password !== confirm && (
+                      <div className="text-danger small mt-1">
+                        <i className="bi bi-exclamation-circle me-1" />
+                        Passwords do not match
+                      </div>
+                    )}
+                    {confirm && password === confirm && allPasswordChecksPassed && (
+                      <div className="text-success small mt-1">
+                        <i className="bi bi-check-circle me-1" />
+                        Passwords match
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div className="form-text mb-3">
-                  Use at least 8 characters. Passwords are securely hashed.
+
+                {/* Password requirements checklist */}
+                <div className={`password-requirements mt-3 mb-3 ${passwordFocused || password ? 'visible' : ''}`}>
+                  <div className="requirements-header">
+                    <i className="bi bi-shield-lock me-1" />
+                    Password requirements
+                  </div>
+                  <div className="requirements-grid">
+                    <RequirementItem met={passwordChecks.minLength} label="At least 8 characters" />
+                    <RequirementItem met={passwordChecks.hasUppercase} label="One uppercase letter (A-Z)" />
+                    <RequirementItem met={passwordChecks.hasLowercase} label="One lowercase letter (a-z)" />
+                    <RequirementItem met={passwordChecks.hasNumber} label="One number (0-9)" />
+                    <RequirementItem met={passwordChecks.hasSpecial} label="One special character (!@#$%...)" />
+                  </div>
                 </div>
 
                 {sensorAvailable && (
@@ -141,7 +187,7 @@ export default function RegisterPage() {
                   </div>
                 )}
 
-                <button type="submit" className="btn btn-primary w-100 py-2" disabled={loading}>
+                <button type="submit" className="btn btn-primary w-100 py-2" disabled={loading || (password.length > 0 && !allPasswordChecksPassed)}>
                   {loading ? <><span className="spinner-border spinner-border-sm me-1" /> Creating…</> : <><i className="bi bi-person-plus me-1" /> Create account</>}
                 </button>
               </form>
@@ -192,6 +238,59 @@ export default function RegisterPage() {
         }
         .btn-link:hover {
           color: #495057;
+        }
+
+        /* Password requirements styling */
+        .password-requirements {
+          background: #f8f9fa;
+          border: 1px solid #e9ecef;
+          border-radius: 0.6rem;
+          padding: 0.85rem 1rem;
+          opacity: 0;
+          max-height: 0;
+          overflow: hidden;
+          transition: opacity 0.25s ease, max-height 0.3s ease, padding 0.3s ease, margin 0.3s ease;
+          padding-top: 0;
+          padding-bottom: 0;
+          margin-top: 0 !important;
+          margin-bottom: 0 !important;
+        }
+        .password-requirements.visible {
+          opacity: 1;
+          max-height: 300px;
+          padding-top: 0.85rem;
+          padding-bottom: 0.85rem;
+          margin-top: 1rem !important;
+          margin-bottom: 1rem !important;
+        }
+        .requirements-header {
+          font-size: 0.8rem;
+          font-weight: 600;
+          color: #495057;
+          text-transform: uppercase;
+          letter-spacing: 0.03em;
+          margin-bottom: 0.6rem;
+        }
+        .requirements-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 0.4rem 1rem;
+        }
+        @media (max-width: 576px) {
+          .requirements-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+        .requirement-item {
+          font-size: 0.82rem;
+          transition: color 0.2s ease;
+        }
+        .requirement-item i {
+          font-size: 0.95rem;
+          transition: color 0.2s ease;
+        }
+        .requirement-item.met span {
+          font-weight: 500;
         }
       `}</style>
     </div>

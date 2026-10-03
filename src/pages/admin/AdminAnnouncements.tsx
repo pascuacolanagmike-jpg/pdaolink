@@ -21,13 +21,11 @@ interface AnnouncementComment {
   updated_at?: string
   edited_at?: string | null
   is_hidden?: boolean
-  /** When set, only this user (and admins) can see the comment. */
   visible_to_user_id?: string | null
   user?: {
     full_name?: string
     avatar_url?: string
   } | null
-  /** Resolved target user for private replies (populated client-side) */
   visibleToUser?: {
     full_name?: string
   } | null
@@ -56,6 +54,10 @@ export default function AdminAnnouncements() {
   const [editImagePreview, setEditImagePreview] = useState<string | null>(null)
   const editFileRef = useRef<HTMLInputElement>(null)
 
+  // ── Bulk selection ──
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+
   // Comments UI
   const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set())
   const [showHidden, setShowHidden] = useState(false)
@@ -72,7 +74,6 @@ export default function AdminAnnouncements() {
   const [replyText, setReplyText] = useState('')
   const [replyBusy, setReplyBusy] = useState(false)
   const [replyHadProfanity, setReplyHadProfanity] = useState(false)
-  /** Default TRUE — admin replies are private by default. */
   const [replyIsPrivate, setReplyIsPrivate] = useState(true)
 
   // Edit comment
@@ -109,7 +110,6 @@ export default function AdminAnnouncements() {
       return
     }
 
-    // Collect ALL user ids we need to resolve: comment authors + private targets
     const userIds = Array.from(
       new Set(
         (commentsData ?? []).flatMap((c: any) =>
@@ -308,7 +308,78 @@ export default function AdminAnnouncements() {
       return
     }
 
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      next.delete(a.id)
+      return next
+    })
     setSuccess('Announcement deleted.')
+    load()
+    loadComments()
+  }
+
+  // ── Bulk selection helpers ──
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const allSelected = items.length > 0 && selectedIds.size === items.length
+  const someSelected = selectedIds.size > 0 && !allSelected
+
+  const toggleSelectAll = () => {
+    if (allSelected) setSelectedIds(new Set())
+    else setSelectedIds(new Set(items.map((i) => i.id)))
+  }
+
+  const clearSelection = () => setSelectedIds(new Set())
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return
+    const count = selectedIds.size
+    if (
+      !confirm(
+        `Delete ${count} selected announcement${count > 1 ? 's' : ''}?\n\n` +
+          `This also removes their images and all attached comments. This cannot be undone.`
+      )
+    )
+      return
+
+    setError(null)
+    setBulkDeleting(true)
+
+    const ids = Array.from(selectedIds)
+    const toDelete = items.filter((i) => selectedIds.has(i.id))
+    const imagePaths = toDelete
+      .map((i) => i.image_path)
+      .filter(Boolean) as string[]
+
+    if (imagePaths.length > 0) {
+      const { error: imgErr } = await supabase.storage
+        .from('announcements')
+        .remove(imagePaths)
+      if (imgErr) console.warn('[announcements] bulk image remove:', imgErr.message)
+    }
+
+    const { error: delErr } = await supabase
+      .from('announcements')
+      .delete()
+      .in('id', ids)
+
+    setBulkDeleting(false)
+
+    if (delErr) {
+      console.error('[announcements] bulk delete:', delErr)
+      setError(`Delete failed: ${delErr.message}`)
+      return
+    }
+
+    setSelectedIds(new Set())
+    setSuccess(`Deleted ${count} announcement${count > 1 ? 's' : ''}.`)
     load()
     loadComments()
   }
@@ -357,7 +428,6 @@ export default function AdminAnnouncements() {
     setEditHadProfanity(false)
   }
 
-  // ── LIVE MASK: edit modal ─────────────────────────────
   const handleEditTextChange = (raw: string) => {
     const { filtered, clean } = checkProfanity(raw)
     setEditingText(filtered)
@@ -409,11 +479,10 @@ export default function AdminAnnouncements() {
     })
     setReplyText('')
     setReplyHadProfanity(false)
-    setReplyIsPrivate(true)     // ← default to private reply
+    setReplyIsPrivate(true)
     setError(null)
   }
 
-  // ── LIVE MASK: reply box ─────────────────────────────
   const handleReplyTextChange = (raw: string) => {
     const { filtered, clean } = checkProfanity(raw)
     setReplyText(filtered)
@@ -444,15 +513,11 @@ export default function AdminAnnouncements() {
       announcement_id: replyTo.announcementId,
       user_id: profile.id,
       content: filtered,
-      // 🔒 When private, only the target user will be able to SELECT this row (RLS).
       visible_to_user_id: replyIsPrivate ? replyTo.targetUserId : null,
     }
 
-    // Try with parent_id first (threaded reply)
     let payload: any = { ...basePayload }
     if (replyTo.topLevelId) payload.parent_id = replyTo.topLevelId
-
-    console.log('[reply] inserting:', payload)
 
     let { data, error: insErr } = await supabase
       .from('announcement_comments')
@@ -460,7 +525,6 @@ export default function AdminAnnouncements() {
       .select()
       .single()
 
-    // Fallback if parent_id column is missing (SQL not applied)
     if (insErr && /parent_id/i.test(insErr.message || '')) {
       console.warn('[reply] parent_id column missing — retrying without it')
       const retry = await supabase
@@ -479,9 +543,6 @@ export default function AdminAnnouncements() {
       return
     }
 
-    console.log('[reply] inserted:', data)
-
-    // Notify the target user (they're the only one who'll see a private reply)
     try {
       if (replyTo.targetUserId !== profile.id) {
         await supabase.from('notifications').insert({
@@ -650,7 +711,6 @@ export default function AdminAnnouncements() {
               </div>
             )}
 
-            {/* ── Private / public toggle ────────────────── */}
             <div className="form-check mb-2">
               <input
                 className="form-check-input"
@@ -850,11 +910,34 @@ export default function AdminAnnouncements() {
           </div>
 
           <div className="col-lg-7">
-            <div className="d-flex justify-content-between align-items-center mb-2">
-              <h6 className="text-muted text-uppercase small fw-bold mb-0">
-                Existing announcements
-              </h6>
-              <div className="form-check form-switch small">
+            {/* ── Toolbar: select-all + show-hidden ── */}
+            <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+              <div className="d-flex align-items-center gap-2">
+                {items.length > 0 && (
+                  <div className="form-check mb-0">
+                    <input
+                      className="form-check-input"
+                      type="checkbox"
+                      id="selectAllAnnouncements"
+                      checked={allSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someSelected
+                      }}
+                      onChange={toggleSelectAll}
+                    />
+                    <label
+                      className="form-check-label small text-muted"
+                      htmlFor="selectAllAnnouncements"
+                    >
+                      Select all
+                    </label>
+                  </div>
+                )}
+                <h6 className="text-muted text-uppercase small fw-bold mb-0">
+                  Existing announcements
+                </h6>
+              </div>
+              <div className="form-check form-switch small mb-0">
                 <input
                   className="form-check-input"
                   type="checkbox"
@@ -870,6 +953,43 @@ export default function AdminAnnouncements() {
                 </label>
               </div>
             </div>
+
+            {/* ── Bulk action bar ── */}
+            {selectedIds.size > 0 && (
+              <div className="bulk-bar mb-2">
+                <span className="fw-semibold small">
+                  <i className="bi bi-check2-square me-1" />
+                  {selectedIds.size} selected
+                </span>
+                <div className="d-flex gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-danger"
+                    onClick={handleBulkDelete}
+                    disabled={bulkDeleting}
+                  >
+                    {bulkDeleting ? (
+                      <>
+                        <span className="spinner-border spinner-border-sm me-1" />{' '}
+                        Deleting…
+                      </>
+                    ) : (
+                      <>
+                        <i className="bi bi-trash me-1" /> Delete selected
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-soft"
+                    onClick={clearSelection}
+                    disabled={bulkDeleting}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+            )}
 
             {loading ? (
               <div className="text-center py-4">
@@ -889,10 +1009,15 @@ export default function AdminAnnouncements() {
 
                   const topLevel = announcementComments.filter((c) => !c.parent_id)
                   const isExpanded = expandedComments.has(a.id)
+                  const isSelected = selectedIds.has(a.id)
 
                   return (
                     <div className="col-12" key={a.id}>
-                      <div className="card border-0 shadow-sm">
+                      <div
+                        className={`card border-0 shadow-sm announcement-card ${
+                          isSelected ? 'announcement-card-selected' : ''
+                        }`}
+                      >
                         {imgUrl && (
                           <img
                             src={imgUrl}
@@ -903,17 +1028,26 @@ export default function AdminAnnouncements() {
                         )}
                         <div className="card-body">
                           <div className="d-flex justify-content-between align-items-start gap-2 mb-2">
-                            <h6 className="mb-0">
-                              {a.title}{' '}
-                              {a.is_pinned && (
-                                <span className="pin-badge">
-                                  <i className="bi bi-pin-angle-fill" /> Pinned
-                                </span>
-                              )}
-                            </h6>
+                            <div className="d-flex align-items-start gap-2 flex-grow-1 min-w-0">
+                              <input
+                                type="checkbox"
+                                className="form-check-input mt-1 flex-shrink-0"
+                                checked={isSelected}
+                                onChange={() => toggleSelect(a.id)}
+                                aria-label={`Select announcement: ${a.title}`}
+                              />
+                              <h6 className="mb-0 text-truncate">
+                                {a.title}{' '}
+                                {a.is_pinned && (
+                                  <span className="pin-badge">
+                                    <i className="bi bi-pin-angle-fill" /> Pinned
+                                  </span>
+                                )}
+                              </h6>
+                            </div>
                             <button
                               type="button"
-                              className="btn btn-sm btn-soft"
+                              className="btn btn-sm btn-soft flex-shrink-0"
                               onClick={() => {
                                 setEditItem({
                                   ...a,
@@ -924,6 +1058,7 @@ export default function AdminAnnouncements() {
                                 setEditImagePreview(getImageUrl(a.image_path))
                                 setShowEdit(true)
                               }}
+                              title="Edit announcement"
                             >
                               <i className="bi bi-pencil" />
                             </button>
@@ -973,13 +1108,29 @@ export default function AdminAnnouncements() {
                             )}
                           </div>
 
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-outline-danger mt-2"
-                            onClick={() => handleDelete(a)}
-                          >
-                            <i className="bi bi-trash me-1" /> Delete
-                          </button>
+                          <div className="d-flex flex-wrap gap-2 mt-2">
+                            <button
+                              type="button"
+                              className={`btn btn-sm ${
+                                isSelected ? 'btn-primary' : 'btn-outline-secondary'
+                              }`}
+                              onClick={() => toggleSelect(a.id)}
+                            >
+                              <i
+                                className={`bi ${
+                                  isSelected ? 'bi-check2-square' : 'bi-square'
+                                } me-1`}
+                              />
+                              {isSelected ? 'Selected' : 'Select'}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-danger"
+                              onClick={() => handleDelete(a)}
+                            >
+                              <i className="bi bi-trash me-1" /> Delete
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1174,7 +1325,29 @@ export default function AdminAnnouncements() {
           filter: blur(4px);
           user-select: none;
           transition: filter 0.15s ease;
-        }word
+        }
+
+        .bulk-bar {
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: space-between;
+          align-items: center;
+          gap: 0.5rem;
+          padding: 0.5rem 0.75rem;
+          background: #eaf2ff;
+          border: 1px solid #b8d4f0;
+          border-radius: 0.5rem;
+        }
+
+        .announcement-card {
+          transition: border-color 0.15s ease, box-shadow 0.15s ease;
+          border: 1px solid transparent;
+        }
+        .announcement-card-selected {
+          border-color: #0056b3 !important;
+          box-shadow: 0 0 0 2px rgba(0, 86, 179, 0.15);
+          background: #fbfdff;
+        }
       `}</style>
     </AppLayout>
   )

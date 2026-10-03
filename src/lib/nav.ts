@@ -13,7 +13,7 @@ export const ADMIN_NAV = [
   { to: '/admin/verifications', icon: 'bi-shield-check', label: 'Verifications' },  // ← NEW
   { to: '/admin/applicants',    icon: 'bi-people',       label: 'Applicants' },
   { to: '/admin/archived',      icon: 'bi-archive',      label: 'Archived' },
-  { to: '/admin/e-id',          icon: 'bi-card-text',    label: 'E-ID' },
+  { to: '/admin/e-id',          icon: 'bi-card-text',    label: 'Print ID' },
   { to: '/admin/announcements', icon: 'bi-megaphone',    label: 'Announcements' },
   { to: '/admin/reports',       icon: 'bi-bar-chart',    label: 'Reports' },
   { to: '/admin/change-password', label: 'Change Password', icon: 'bi-key' },

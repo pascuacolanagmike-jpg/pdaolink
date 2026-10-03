@@ -26,7 +26,7 @@ type ArchivedApplication = Application & {
   last_updated?: string | null
 }
 
-type ConfirmKind = 'hide' | 'unhide' | 'delete'
+type ConfirmKind = 'hide' | 'unhide' | 'delete' | 'restore'
 
 interface ConfirmState {
   kind: ConfirmKind
@@ -109,8 +109,6 @@ export default function ArchivedPage() {
     const rows = (data ?? []) as ArchivedApplication[]
     setAll(rows)
 
-    // Probe: does the column exist? If any row has the key, yes.
-    // If we get zero rows we can't tell — assume supported so we don't nag.
     if (rows.length > 0) {
       setHideSupported(
         Object.prototype.hasOwnProperty.call(rows[0], 'archived_hidden'),
@@ -126,7 +124,6 @@ export default function ArchivedPage() {
 
   useEffect(() => {
     if (!toast) return
-    // Keep error/warning toasts longer so admins can read the SQL hint
     const ms = toast.type === 'success' ? 3500 : 12000
     const t = window.setTimeout(() => setToast(null), ms)
     return () => window.clearTimeout(t)
@@ -277,7 +274,7 @@ export default function ArchivedPage() {
         .from('applications')
         .delete()
         .in('id', ids)
-        .select('id')          // ← REQUIRED: without this, RLS blocks silently
+        .select('id')
 
       setBusy(false)
 
@@ -292,7 +289,6 @@ export default function ArchivedPage() {
       const removedIds = new Set((removed ?? []).map((r: any) => r.id))
       const blocked = ids.filter((id) => !removedIds.has(id))
 
-      // Only remove from local state the ones that were REALLY removed
       setAll((prev) => prev.filter((a) => !removedIds.has(a.id)))
       setSelectedIds((prev) => {
         const next = new Set(prev)
@@ -326,6 +322,61 @@ export default function ArchivedPage() {
       return
     }
 
+    // ── RESTORE to Applicants ──
+    if (kind === 'restore') {
+      const { data: updated, error } = await supabase
+        .from('applications')
+        .update({ is_deleted: false, archived_hidden: false })
+        .in('id', ids)
+        .select('id')
+
+      setBusy(false)
+
+      if (error) {
+        setToast({
+          type: 'danger',
+          text: `Restore failed: ${describeError(error.message)}`,
+        })
+        return
+      }
+
+      const updatedIds = new Set((updated ?? []).map((r: any) => r.id))
+      const blocked = ids.filter((id) => !updatedIds.has(id))
+
+      // Restored records no longer belong in the archive — remove them.
+      setAll((prev) => prev.filter((a) => !updatedIds.has(a.id)))
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        for (const id of updatedIds) next.delete(id)
+        return next
+      })
+      setConfirm(null)
+      setConfirmText('')
+
+      if (updatedIds.size === 0) {
+        setToast({
+          type: 'danger',
+          text: `Nothing was restored. ${RLS_UPDATE_HINT}`,
+        })
+        return
+      }
+
+      if (blocked.length > 0) {
+        setToast({
+          type: 'warning',
+          text: `Restored ${updatedIds.size} of ${ids.length}. ${blocked.length} were blocked by the database. ${RLS_UPDATE_HINT}`,
+        })
+      } else {
+        setToast({
+          type: 'success',
+          text: `Restored ${updatedIds.size} record${
+            updatedIds.size === 1 ? '' : 's'
+          } to the Applicants list.`,
+        })
+      }
+      return
+    }
+
     // ── HIDE / UNHIDE ──
     const hidden = kind === 'hide'
 
@@ -333,7 +384,7 @@ export default function ArchivedPage() {
       .from('applications')
       .update({ archived_hidden: hidden })
       .in('id', ids)
-      .select('id')             // ← REQUIRED: verify it actually changed
+      .select('id')
 
     setBusy(false)
 
@@ -397,6 +448,14 @@ export default function ArchivedPage() {
     const noun = `${n} record${n === 1 ? '' : 's'}`
 
     switch (confirm.kind) {
+      case 'restore':
+        return {
+          title: 'Restore to Applicants',
+          body: `${noun} will be moved back to the Applicants page and become active again. Any hidden-from-archive flag will also be cleared.`,
+          confirmLabel: 'Restore to Applicants',
+          confirmClass: 'btn-primary',
+          requireTyping: false,
+        }
       case 'hide':
         return {
           title: 'Hide from archive',
@@ -488,7 +547,7 @@ export default function ArchivedPage() {
                 “Hide” is disabled — the database column is missing.
               </div>
               <div className="small mt-1">
-                Permanent delete works. To enable hide/restore, run this in the
+                Permanent delete and restore work. To enable hide/restore-in-archive, run this in the
                 Supabase SQL Editor once:
               </div>
               <pre className="small mb-0 mt-2 p-2 bg-white border rounded">
@@ -689,6 +748,17 @@ export default function ArchivedPage() {
 
               <button
                 type="button"
+                className="btn btn-sm btn-primary"
+                onClick={() => openConfirm('restore', selectedIdsList)}
+                disabled={busy}
+                title="Move selected records back to the Applicants page"
+              >
+                <i className="bi bi-arrow-counterclockwise me-1" />
+                Restore to Applicants
+              </button>
+
+              <button
+                type="button"
                 className="btn btn-sm btn-soft"
                 onClick={() =>
                   openConfirm(showHidden ? 'unhide' : 'hide', selectedIdsList)
@@ -705,7 +775,7 @@ export default function ArchivedPage() {
                     showHidden ? 'bi-eye' : 'bi-eye-slash'
                   } me-1`}
                 />
-                {showHidden ? 'Restore selected' : 'Hide selected'}
+                {showHidden ? 'Show in archive' : 'Hide in archive'}
               </button>
 
               <button
@@ -714,7 +784,7 @@ export default function ArchivedPage() {
                 onClick={() => openConfirm('delete', selectedIdsList)}
                 disabled={busy}
               >
-                <i className="bi bi-trash me-1" /> Delete selected
+                <i className="bi bi-trash me-1" /> Delete permanently
               </button>
 
               <button
@@ -867,18 +937,29 @@ export default function ArchivedPage() {
 
                             <button
                               type="button"
+                              className="btn btn-soft text-success"
+                              title="Restore to Applicants"
+                              aria-label="Restore to Applicants"
+                              onClick={() => openConfirm('restore', [a.id])}
+                              disabled={busy}
+                            >
+                              <i className="bi bi-arrow-counterclockwise" />
+                            </button>
+
+                            <button
+                              type="button"
                               className="btn btn-soft"
                               title={
                                 hideSupported === false
                                   ? 'Hidden column missing'
                                   : hidden
-                                    ? 'Restore to archive'
-                                    : 'Hide from archive'
+                                    ? 'Show in archive'
+                                    : 'Hide in archive'
                               }
                               aria-label={
                                 hidden
-                                  ? 'Restore to archive'
-                                  : 'Hide from archive'
+                                  ? 'Show in archive'
+                                  : 'Hide in archive'
                               }
                               onClick={() =>
                                 openConfirm(hidden ? 'unhide' : 'hide', [a.id])
@@ -947,7 +1028,9 @@ export default function ArchivedPage() {
                   className={`bi ${
                     confirm.kind === 'delete'
                       ? 'bi-exclamation-octagon text-danger'
-                      : 'bi-question-circle text-primary-pdao'
+                      : confirm.kind === 'restore'
+                        ? 'bi-arrow-counterclockwise text-success'
+                        : 'bi-question-circle text-primary-pdao'
                   } me-1`}
                 />
                 {confirmCopy.title}
