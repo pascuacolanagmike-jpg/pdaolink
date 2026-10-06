@@ -181,7 +181,7 @@ function findAssistanceLabel(key: string, nodes: AssistanceNode[] = ASSISTANCE_T
 // Locked LGU scope — Cauayan City, Isabela, Region 2
 // ─────────────────────────────────────────────────────────
 const LOCKED_MUNICIPALITY = 'Cauayan City'
-const LOCKED_PROVINCE = 'ISABELA'
+const LOCKED_PROVINCE = 'Isabela'
 const LOCKED_REGION = 'Region 2'
 const LOCKED_INPUT_STYLE = { backgroundColor: '#eef2f7', cursor: 'not-allowed' } as const
 

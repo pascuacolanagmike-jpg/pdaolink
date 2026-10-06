@@ -28,10 +28,23 @@ function getDisabilityText(app: Application): string {
 }
 
 const styles = `
+  /* =========================================================
+     SINGLE SOURCE OF TRUTH FOR CARD GEOMETRY (CR80)
+     Both the on-screen print preview AND the real printout
+     read these values, so the preview is a 1:1 mirror of
+     what actually comes out of the printer.
+     ========================================================= */
+  .eid-page-wrapper {
+    --eid-card-w: 85.6mm;
+    --eid-card-h: 53.98mm;
+    --eid-card-gap: 10mm;
+    --eid-card-radius: 8px;
+    padding-bottom: 1rem;
+  }
+
   /* =========================================
      BASE STYLES (For Screen Preview)
      ========================================= */
-  .eid-page-wrapper { padding-bottom: 1rem; }
   .eid-scene { perspective: 1400px; width: 100%; max-width: 500px; margin: 0 auto; }
   .eid-card-3d {
     position: relative; width: 100%; aspect-ratio: 1.586 / 1;
@@ -40,9 +53,9 @@ const styles = `
     cursor: pointer;
   }
   .eid-card-3d.flipped { transform: rotateY(180deg); }
-  
+
   .eid-face {
-    position: absolute; inset: 0; border-radius: 8px;
+    position: absolute; inset: 0; border-radius: var(--eid-card-radius);
     backface-visibility: hidden; -webkit-backface-visibility: hidden;
     overflow: hidden;
     box-shadow: 0 8px 32px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.12);
@@ -93,20 +106,58 @@ const styles = `
   }
   .eid-photo-empty svg { opacity: 0.5; }
 
-  /* =========================================
-     SIDE-BY-SIDE LAYOUT (Hidden on screen, used for printing)
-     ========================================= */
+  /* =========================================================
+     PRINT LAYOUT  —  ONE markup, TWO contexts
+       (a) on screen  -> only when sideBySide = true
+       (b) on paper   -> automatically, via @media print
+     ========================================================= */
   .eid-print-layout {
-    display: none; /* Hidden on the normal webpage */
+    display: none;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: center;
+    gap: var(--eid-card-gap);
+    background: #fff;
   }
+
+  /* ---------- (a) ON-SCREEN MIRROR OF THE PRINTED SHEET ---------- */
+  .eid-preview-viewport {
+    width: 100%;
+    overflow-x: auto;
+    padding: 8px 0 20px;
+    background: #f1f5f9;
+    border-radius: 12px;
+  }
+  .eid-print-layout.eid-preview-mode {
+    display: flex;
+    width: max-content;
+    margin: 0 auto;
+    padding: 6mm 8mm;   /* makes it read like a sheet; zeroed for real printing */
+  }
+  .eid-preview-mode .eid-print-card {
+    box-shadow: 0 8px 32px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.12);
+    outline: 1px solid #e2e8f0;
+  }
+  .eid-preview-label {
+    font-family: Arial, sans-serif;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: #94a3b8;
+  }
+
+  /* ---------- CARD WRAPPER / CARD (shared by both contexts) ---------- */
   .eid-print-card-wrap {
     display: flex; flex-direction: column;
     align-items: center; gap: 6px;
   }
   .eid-print-card {
-    position: relative; width: 380px; max-width: 100%;
-    aspect-ratio: 1.586 / 1; border-radius: 8px;
-    overflow: hidden; background: #fff;
+    position: relative;
+    box-sizing: border-box;
+    width: var(--eid-card-w);
+    height: var(--eid-card-h);
+    border-radius: var(--eid-card-radius);
+    overflow: hidden;
+    background: #fff;
   }
 
   /* =========================================
@@ -114,46 +165,62 @@ const styles = `
      ========================================= */
   @media print {
     @page { size: auto; margin: 0; }
-    
+
     /* 1. Hide EVERYTHING on the page by default */
-    body * { 
-      visibility: hidden; 
+    body * {
+      visibility: hidden;
     }
-    
+
     /* 2. Hide the interactive 3D card completely */
-    .eid-scene { 
-      display: none !important; 
+    .eid-scene {
+      display: none !important;
     }
-    
-    /* 3. Show ONLY the layout and its children */
+
+    /* 3. Show ONLY the print layout and its children */
     .eid-print-layout, .eid-print-layout * {
       visibility: visible !important;
     }
-    
-    /* 4. PERFECTLY CENTER the cards horizontally and vertically on the page */
+
+    /* 4. CENTER the cards on the page — SIDE-BY-SIDE (row) */
     .eid-print-layout {
       position: absolute !important;
       top: 50% !important;
       left: 50% !important;
       transform: translate(-50%, -50%) !important;
       display: flex !important;
-      flex-direction: column !important; /* Stacked top-down */
-      gap: 15mm !important;              /* Space between cards */
-      align-items: center !important;     /* Centers cards within the flex column */
+      flex-direction: row !important;
+      flex-wrap: nowrap !important;
+      gap: var(--eid-card-gap) !important;
+      align-items: center !important;
+      justify-content: center !important;
       background: #fff !important;
+      width: auto !important;
+      margin: 0 !important;
+      padding: 0 !important;
       z-index: 99999 !important;
     }
 
-    /* 5. Force exact physical dimensions (Standard CR80 ID Card size) */
+    /* 5. Force exact CR80 physical dimensions (85.6mm × 53.98mm) */
     .eid-print-card {
-      width: 85.6mm !important;
-      height: 53.98mm !important;
-      aspect-ratio: auto !important;
+      width: var(--eid-card-w) !important;
+      height: var(--eid-card-h) !important;
       box-shadow: none !important;
+      outline: none !important;
       border: 1px solid #ddd !important;
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;
     }
+
+    /* 6. Strip every preview-only wrapper so paper == preview */
+    .eid-preview-viewport {
+      overflow: visible !important;
+      padding: 0 !important;
+      width: auto !important;
+      background: transparent !important;
+      border-radius: 0 !important;
+    }
+    .eid-preview-label { display: none !important; }
+    .eid-print-card-wrap { gap: 0 !important; }
   }
 `
 
@@ -177,15 +244,15 @@ export default function EidCard({
   const frontInner = (
     <>
       <img src="https://cdn.postimage.me/2026/09/13/pwd-front.jpeg" alt="" className="eid-bg" />
-      
+
       <div className="eid-text eid-text-center field-front-name">
         {fullName}
       </div>
-      
+
       <div className="eid-text eid-text-center field-front-disability">
         {disability}
       </div>
-      
+
       <div className="eid-photo-wrap" style={{ top: '26%', left: '68%', width: '27%', height: '54%' }}>
         {photoUrl ? (
           <img src={photoUrl} alt="Applicant" />
@@ -199,7 +266,7 @@ export default function EidCard({
           </div>
         )}
       </div>
-      
+
       <div className="eid-text eid-text-center field-front-pwd">
         {pwdNumber}
       </div>
@@ -209,50 +276,59 @@ export default function EidCard({
   const backInner = (
     <>
       <img src="https://cdn.postimage.me/2026/09/13/849d1475-9ccb-4eae-811a-06546c6317c0.jpeg" alt="" className="eid-bg" />
-      
+
       <div className="eid-text field-back-address">
         {address || '—'}
       </div>
-      
+
       <div className="eid-text field-back-birth">
         {birthDate}
       </div>
-      
+
       <div className="eid-text field-back-issue">
         {fmtDate(application.last_updated)}
       </div>
-      
+
       <div className="eid-text field-back-gender">
         {gender ?? '—'}
       </div>
-      
+
       <div className="eid-text field-back-blood">
         {application.blood_type ?? '—'}
       </div>
-      
+
       <div className="eid-text field-back-emergency-name">
         {application.emergency_name || '—'}
       </div>
-      
+
       <div className="eid-text field-back-emergency-contact">
         {application.emergency_contact_number || '—'}
       </div>
     </>
   )
 
-  // If you explicitly request sideBySide for a screen preview, show it stacked vertically.
+  // ------------------------------------------------------------------
+  // SIDE-BY-SIDE MODE
+  // Renders the *same* `.eid-print-layout` markup that the printer
+  // uses, at the *same* 85.6mm x 53.98mm size — so the preview is a
+  // true mirror of the printed sheet. The only extras are the
+  // "Front"/"Back" labels and the sheet chrome, both of which are
+  // stripped out by @media print.
+  // ------------------------------------------------------------------
   if (sideBySide) {
     return (
       <div className="eid-page-wrapper">
         <style>{styles}</style>
-        <div className="eid-print-layout" style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '10px', alignItems: 'center' }}>
-          <div className="eid-print-card-wrap">
-            <div className="eid-print-card" style={{ boxShadow: '0 8px 32px rgba(0,0,0,0.22)' }}>{frontInner}</div>
-            <div className="eid-print-label" style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 'bold' }}>Front</div>
-          </div>
-          <div className="eid-print-card-wrap">
-            <div className="eid-print-card" style={{ boxShadow: '0 8px 32px rgba(0,0,0,0.22)' }}>{backInner}</div>
-            <div className="eid-print-label" style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 'bold' }}>Back</div>
+        <div className="eid-preview-viewport">
+          <div className="eid-print-layout eid-preview-mode">
+            <div className="eid-print-card-wrap">
+              <div className="eid-print-card">{frontInner}</div>
+              <div className="eid-preview-label">Front</div>
+            </div>
+            <div className="eid-print-card-wrap">
+              <div className="eid-print-card">{backInner}</div>
+              <div className="eid-preview-label">Back</div>
+            </div>
           </div>
         </div>
       </div>
@@ -262,7 +338,7 @@ export default function EidCard({
   return (
     <div className="eid-page-wrapper">
       <style>{styles}</style>
-      
+
       {/* 1. Interactive Screen View */}
       <div className="eid-scene">
         <div className={`eid-card-3d${flipped ? ' flipped' : ''}`} onClick={onFlip} style={{ cursor: onFlip ? 'pointer' : 'default' }}>
@@ -273,11 +349,11 @@ export default function EidCard({
 
       {/* 2. Hidden Print Layout (Automatically appears when printing) */}
       <div className="eid-print-layout">
-        {/* Front Card */}
+        {/* Front Card (left) */}
         <div className="eid-print-card-wrap">
           <div className="eid-print-card">{frontInner}</div>
         </div>
-        {/* Back Card */}
+        {/* Back Card (right) */}
         <div className="eid-print-card-wrap">
           <div className="eid-print-card">{backInner}</div>
         </div>
