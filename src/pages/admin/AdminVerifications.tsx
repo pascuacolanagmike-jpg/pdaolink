@@ -95,18 +95,21 @@ export default function AdminVerifications() {
 
   // 🔔 Sends the email AFTER fetching the fresh row from Supabase
   const handleReviewDone = useCallback(
-    async (outcome: 'approved' | 'rejected' | 'resubmit' | string) => {
+    async (outcome?: 'approved' | 'rejected' | 'resubmit' | 'saved') => {
       const reviewedId = openId
       setOpenId(null)
 
+      // Normalize undefined → 'saved'
+      const result = outcome ?? 'saved'
+
       // 1. Update UI right away
-      if (outcome === 'approved') {
+      if (result === 'approved') {
         setFlash('Applicant approved — notification sent.')
         setTab('approved')
-      } else if (outcome === 'rejected') {
+      } else if (result === 'rejected') {
         setFlash('Applicant rejected — they will be notified with the reason.')
         setTab('rejected')
-      } else if (outcome === 'resubmit') {
+      } else if (result === 'resubmit') {
         setFlash('Resubmission requested — applicant notified.')
         setTab('pending')
       } else {
@@ -114,7 +117,7 @@ export default function AdminVerifications() {
       }
 
       // 2. Fetch the fresh row (drawer just updated it in Supabase)
-      if (reviewedId && (outcome === 'approved' || outcome === 'rejected' || outcome === 'resubmit')) {
+      if (reviewedId && (result === 'approved' || result === 'rejected' || result === 'resubmit')) {
         const { data, error } = await supabase
           .from('profiles')
           .select('email, fullname, verification_notes')
@@ -125,7 +128,7 @@ export default function AdminVerifications() {
           console.error('[AdminVerifications] fetch fresh row error:', error)
         } else if (data?.email) {
           const res = await sendVerificationEmail({
-            outcome: outcome as 'approved' | 'rejected' | 'resubmit',
+            outcome: result,
             toEmail: data.email,
             toName: data.fullname,
             message: data.verification_notes,
