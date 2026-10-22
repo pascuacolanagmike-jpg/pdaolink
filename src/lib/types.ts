@@ -123,6 +123,7 @@ export interface Profile {
   fullname: string
   email: string
   role: Role
+  phone: string | null                        // ← ADDED
   contact_number: string | null
   address: string | null
   birth_date: string | null
@@ -132,8 +133,9 @@ export interface Profile {
 
   // Identity verification (added for applicant review flow)
   verification_status: 'unverified' | 'pending' | 'approved' | 'rejected' | 'resubmit'
-  verification_note: string | null
+  verification_notes: string | null           // ← RENAMED (was verification_note)
   verification_submitted_at: string | null
+  verification_reviewed_at: string | null     // ← ADDED
 }
 
 export interface Application {
