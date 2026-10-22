@@ -9,9 +9,9 @@ export default function RejectedPage() {
       <i className="bi bi-x-circle" style={{ fontSize: 56, color: '#dc3545' }} />
       <h4 className="mt-3">Verification not approved</h4>
 
-      {profile?.verification_note && (
+      {profile?.verification_notes && (
         <div className="alert alert-warning small mt-3 text-start">
-          <strong>Reason:</strong> {profile.verification_note}
+          <strong>Reason:</strong> {profile.verification_notes}
         </div>
       )}
 
