@@ -43,9 +43,9 @@ export default function PendingPage() {
         notified once your account is activated.
       </p>
 
-      {profile?.verification_note && (
+      {profile?.verification_notes && (
         <div className="alert alert-info small mt-3 text-start">
-          <strong>Note from admin:</strong> {profile.verification_note}
+          <strong>Note from admin:</strong> {profile.verification_notes}
         </div>
       )}
 
