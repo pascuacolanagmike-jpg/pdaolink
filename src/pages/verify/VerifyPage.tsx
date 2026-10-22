@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../lib/auth'
@@ -12,12 +12,33 @@ const SLOTS: { key: Slot; label: string; hint: string }[] = [
 ]
 
 export default function VerifyPage() {
-  const { user } = useAuth()
+  const { user, profile, refreshProfile } = useAuth()
   const navigate = useNavigate()
   const [uploaded, setUploaded] = useState<Partial<Record<Slot, string>>>({})
   const [busy, setBusy] = useState<Slot | null>(null)
   const [consent, setConsent] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // ─── NEW: phone state (prefilled if user already has one from a previous attempt) ───
+  const [phone, setPhone] = useState(profile?.phone ?? '')
+  const [submitting, setSubmitting] = useState(false)
+
+  // PH mobile: 0917 123 4567 | +63 917 123 4567 | 09171234567
+  const phoneValid = useMemo(() => {
+    const cleaned = phone.replace(/[\s\-()]/g, '')
+    return /^(?:\+63|0)9\d{9}$/.test(cleaned)
+  }, [phone])
+
+  const normalizePhone = (raw: string) => {
+    const cleaned = raw.replace(/[\s\-()]/g, '')
+    if (cleaned.startsWith('+63')) return cleaned
+    if (cleaned.startsWith('0')) return '+63' + cleaned.slice(1)
+    return cleaned
+  }
+
+  const handlePhoneChange = (value: string) => {
+    if (/^[+]?[\d\s\-()]*$/.test(value)) setPhone(value)
+  }
 
   async function upload(slot: Slot, file: File) {
     if (!user) return
@@ -51,9 +72,30 @@ export default function VerifyPage() {
   async function submit() {
     if (!consent) return setError('Please give consent to process your documents.')
     if (Object.keys(uploaded).length < 3) return setError('Please upload all three documents.')
+    // ─── NEW: phone required before submission ───
+    if (!phoneValid) return setError('Please enter a valid PH mobile number (e.g., 0917 123 4567).')
+
+    setSubmitting(true)
+    setError(null)
+
+    // ─── NEW: save phone to profiles BEFORE the RPC, so the admin reviewer sees it ───
+    // We save first because the SMS on approval depends on this number being present.
+    if (user) {
+      const { error: phoneErr } = await supabase
+        .from('profiles')
+        .update({ phone: normalizePhone(phone) })
+        .eq('id', user.id)
+      if (phoneErr) {
+        setSubmitting(false)
+        return setError('Could not save phone number: ' + phoneErr.message)
+      }
+    }
 
     const { error } = await supabase.rpc('submit_verification')
+    setSubmitting(false)
     if (error) return setError(error.message)
+
+    await refreshProfile?.()
     navigate('/verify/pending', { replace: true })
   }
 
@@ -107,6 +149,43 @@ export default function VerifyPage() {
         </div>
       ))}
 
+      {/* ─── NEW: phone input — this is where the SMS on approval will go ─── */}
+      <div className="card mb-3 shadow-sm border-0">
+        <div className="card-body">
+          <label className="form-label fw-semibold mb-1">
+            <i className="bi bi-phone me-1" />
+            Mobile number
+          </label>
+          <p className="text-muted small mb-2">
+            We'll text you at this number when your account is approved. Use a number you can check immediately.
+          </p>
+          <div className="input-group">
+            <span className="input-group-text bg-white"><i className="bi bi-telephone" /></span>
+            <input
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              className={`form-control ${phone && !phoneValid ? 'is-invalid' : ''} ${phone && phoneValid ? 'is-valid' : ''}`}
+              value={phone}
+              onChange={(e) => handlePhoneChange(e.target.value)}
+              placeholder="0917 123 4567"
+            />
+          </div>
+          {phone && !phoneValid && (
+            <div className="text-danger small mt-1">
+              <i className="bi bi-exclamation-circle me-1" />
+              Enter a valid PH mobile number (e.g., 0917 123 4567 or +63 917 123 4567)
+            </div>
+          )}
+          {phone && phoneValid && (
+            <div className="text-success small mt-1">
+              <i className="bi bi-check-circle me-1" />
+              We'll text you at {normalizePhone(phone)}
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="form-check mb-3">
         <input
           className="form-check-input"
@@ -125,9 +204,17 @@ export default function VerifyPage() {
       <button
         className="btn btn-primary w-100 py-2"
         onClick={submit}
-        disabled={!!busy || !allUploaded || !consent}
+        disabled={!!busy || !allUploaded || !consent || !phoneValid || submitting}
       >
-        <i className="bi bi-send me-1" /> Submit for review
+        {submitting ? (
+          <>
+            <span className="spinner-border spinner-border-sm me-1" /> Submitting…
+          </>
+        ) : (
+          <>
+            <i className="bi bi-send me-1" /> Submit for review
+          </>
+        )}
       </button>
     </div>
   )
