@@ -5,6 +5,8 @@ import { ADMIN_NAV } from '../../lib/nav'
 import { supabase } from '../../lib/supabase'
 import {
   statusColor,
+  statusLabel,           // ← NEW
+  isInactiveStatus,      // ← NEW
   fmtDate,
   fmtDateTime,
   appFullName,
@@ -17,6 +19,8 @@ const STATUS_COLUMNS = [
   'Rejected',
   'Approved',
   'Ready for Pickup',
+  'Deceased',            // ← NEW
+  'Transferred',         // ← NEW
 ] as const
 
 type StatusColumn = (typeof STATUS_COLUMNS)[number]
@@ -76,7 +80,6 @@ export default function ArchivedPage() {
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState<ToastState | null>(null)
 
-  // Whether the DB actually has the archived_hidden column
   const [hideSupported, setHideSupported] = useState<boolean | null>(null)
 
   const [searchInput, setSearchInput] = useState('')
@@ -88,7 +91,7 @@ export default function ArchivedPage() {
   const [confirm, setConfirm] = useState<ConfirmState | null>(null)
   const [confirmText, setConfirmText] = useState('')
 
-  // ── Load ONLY deleted applications ──
+  // ── Load ONLY records hidden from the active list ──
   const loadArchive = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -175,6 +178,8 @@ export default function ArchivedPage() {
       Rejected: 0,
       Approved: 0,
       'Ready for Pickup': 0,
+      Deceased: 0,          // ← NEW
+      Transferred: 0,       // ← NEW
     }
     for (const a of visibleAll) {
       if (base[a.status as StatusColumn] !== undefined) {
@@ -324,26 +329,54 @@ export default function ArchivedPage() {
 
     // ── RESTORE to Applicants ──
     if (kind === 'restore') {
-      const { data: updated, error } = await supabase
-        .from('applications')
-        .update({ is_deleted: false, archived_hidden: false })
-        .in('id', ids)
-        .select('id')
+      const byId = new Map(all.map((a) => [a.id, a]))
+      const inactiveIds = ids.filter((id) =>
+        isInactiveStatus(byId.get(id)?.status ?? ''),
+      )
+      const otherIds = ids.filter(
+        (id) => !isInactiveStatus(byId.get(id)?.status ?? ''),
+      )
+
+      const updatedIds = new Set<string>()
+      const errors: string[] = []
+
+      const baseRestore: Record<string, any> = { is_deleted: false }
+      if (hideSupported !== false) baseRestore.archived_hidden = false
+
+      // Terminal statuses (Deceased / Transferred) → reset to Pending
+      if (inactiveIds.length > 0) {
+        const { data, error } = await supabase
+          .from('applications')
+          .update({ ...baseRestore, status: 'Pending' })
+          .in('id', inactiveIds)
+          .select('id')
+        if (error) errors.push(error.message)
+        for (const r of data ?? []) updatedIds.add((r as any).id)
+      }
+
+      // Legacy soft-deleted records → preserve their previous status
+      if (otherIds.length > 0) {
+        const { data, error } = await supabase
+          .from('applications')
+          .update(baseRestore)
+          .in('id', otherIds)
+          .select('id')
+        if (error) errors.push(error.message)
+        for (const r of data ?? []) updatedIds.add((r as any).id)
+      }
 
       setBusy(false)
 
-      if (error) {
+      if (errors.length > 0) {
         setToast({
           type: 'danger',
-          text: `Restore failed: ${describeError(error.message)}`,
+          text: `Restore failed: ${describeError(errors.join('; '))}`,
         })
         return
       }
 
-      const updatedIds = new Set((updated ?? []).map((r: any) => r.id))
       const blocked = ids.filter((id) => !updatedIds.has(id))
 
-      // Restored records no longer belong in the archive — remove them.
       setAll((prev) => prev.filter((a) => !updatedIds.has(a.id)))
       setSelectedIds((prev) => {
         const next = new Set(prev)
@@ -364,14 +397,14 @@ export default function ArchivedPage() {
       if (blocked.length > 0) {
         setToast({
           type: 'warning',
-          text: `Restored ${updatedIds.size} of ${ids.length}. ${blocked.length} were blocked by the database. ${RLS_UPDATE_HINT}`,
+          text: `Reactivated ${updatedIds.size} of ${ids.length}. ${blocked.length} were blocked by the database. ${RLS_UPDATE_HINT}`,
         })
       } else {
         setToast({
           type: 'success',
-          text: `Restored ${updatedIds.size} record${
+          text: `Reactivated ${updatedIds.size} record${
             updatedIds.size === 1 ? '' : 's'
-          } to the Applicants list.`,
+          }. They are back on the Applicants list as Pending.`,
         })
       }
       return
@@ -450,9 +483,9 @@ export default function ArchivedPage() {
     switch (confirm.kind) {
       case 'restore':
         return {
-          title: 'Restore to Applicants',
-          body: `${noun} will be moved back to the Applicants page and become active again. Any hidden-from-archive flag will also be cleared.`,
-          confirmLabel: 'Restore to Applicants',
+          title: 'Reactivate applicant',
+          body: `${noun} will be moved back to the Applicants list. If the record was marked Deceased or Transfer of Residence (TOR), its status will be reset to Pending so the workflow can resume from the start.`,
+          confirmLabel: 'Reactivate',
           confirmClass: 'btn-primary',
           requireTyping: false,
         }
@@ -498,11 +531,11 @@ export default function ArchivedPage() {
           <div>
             <h3 className="mb-1">
               <i className="bi bi-archive text-primary-pdao me-1" />
-              Archived / Deleted Applications
+              Inactive Applicants
             </h3>
             <p className="text-muted mb-0">
-              Permanent logbook of deleted applicants. Records stay here even
-              after they are removed from the main list.
+              Records of deceased, transferred, and archived applicants. Kept
+              for audit and reporting, hidden from the active list.
             </p>
           </div>
 
@@ -547,8 +580,8 @@ export default function ArchivedPage() {
                 “Hide” is disabled — the database column is missing.
               </div>
               <div className="small mt-1">
-                Permanent delete and restore work. To enable hide/restore-in-archive, run this in the
-                Supabase SQL Editor once:
+                Permanent delete and reactivate still work. To enable hide /
+                restore-in-archive, run this in the Supabase SQL Editor once:
               </div>
               <pre className="small mb-0 mt-2 p-2 bg-white border rounded">
                 {HIDDEN_COLUMN_SQL}
@@ -596,7 +629,7 @@ export default function ArchivedPage() {
               <div className="col">
                 <input
                   className="form-control form-control-lg"
-                  placeholder="Search deleted records by name, email, ID, or disability…"
+                  placeholder="Search inactive records by name, email, ID, or disability…"
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
                   onKeyDown={handleKeyDown}
@@ -670,10 +703,10 @@ export default function ArchivedPage() {
                       onClick={() =>
                         setStatusFilter(statusFilter === s ? '' : s)
                       }
-                      title={`Click to filter: ${s}`}
+                      title={`Click to filter: ${statusLabel(s)}`}
                     >
                       <span className={`badge status-badge ${statusColor(s)}`}>
-                        {s}
+                        {statusLabel(s)}
                       </span>
                     </th>
                   ))}
@@ -685,7 +718,7 @@ export default function ArchivedPage() {
               <tbody>
                 <tr>
                   <td className="text-center fw-semibold text-muted">
-                    {showHidden ? 'Deleted records' : 'Visible records'}
+                    {showHidden ? 'All inactive records' : 'Visible records'}
                   </td>
                   {STATUS_COLUMNS.map((s) => (
                     <td
@@ -720,7 +753,8 @@ export default function ArchivedPage() {
                 className="btn btn-sm btn-primary"
                 onClick={() => setStatusFilter('')}
               >
-                Status: {statusFilter} <i className="bi bi-x ms-1" />
+                Status: {statusLabel(statusFilter)}{' '}
+                <i className="bi bi-x ms-1" />
               </button>
             )}
             {searchQuery && (
@@ -751,10 +785,10 @@ export default function ArchivedPage() {
                 className="btn btn-sm btn-primary"
                 onClick={() => openConfirm('restore', selectedIdsList)}
                 disabled={busy}
-                title="Move selected records back to the Applicants page"
+                title="Move selected records back to the Applicants page (status resets to Pending for terminal states)"
               >
                 <i className="bi bi-arrow-counterclockwise me-1" />
-                Restore to Applicants
+                Reactivate
               </button>
 
               <button
@@ -803,10 +837,10 @@ export default function ArchivedPage() {
         <div className="card border-0 shadow-sm">
           <div className="card-header d-flex justify-content-between align-items-center">
             <span>
-              <i className="bi bi-trash text-primary-pdao me-1" />{' '}
+              <i className="bi bi-archive text-primary-pdao me-1" />{' '}
               {loading
                 ? 'Loading…'
-                : `${filtered.length} deleted application(s)`}
+                : `${filtered.length} inactive application(s)`}
             </span>
             {hiddenCount > 0 && !showHidden && (
               <button
@@ -859,11 +893,12 @@ export default function ArchivedPage() {
                     const disabilities = getDisabilityList(a)
                     const updated = a.last_updated ?? a.submission_date
                     const hidden = isHidden(a)
+                    const inactive = isInactiveStatus(a.status)
 
                     return (
                       <tr
                         key={a.id}
-                        className={hidden ? 'hidden-row' : 'deleted-row'}
+                        className={hidden ? 'hidden-row' : 'inactive-row'}
                       >
                         <td className="text-center">
                           <input
@@ -877,12 +912,14 @@ export default function ArchivedPage() {
                         </td>
                         <td>
                           #{a.id.slice(0, 8)}
-                          <span
-                            className="badge bg-secondary ms-1"
-                            title="Deleted record"
-                          >
-                            <i className="bi bi-trash" />
-                          </span>
+                          {!inactive && (
+                            <span
+                              className="badge bg-secondary ms-1"
+                              title="Archived record"
+                            >
+                              <i className="bi bi-archive" />
+                            </span>
+                          )}
                           {hidden && (
                             <span
                               className="badge bg-dark ms-1"
@@ -892,7 +929,7 @@ export default function ArchivedPage() {
                             </span>
                           )}
                         </td>
-                        <td className="fw-semibold text-decoration-line-through text-muted">
+                        <td className="fw-semibold text-muted">
                           {appFullName(a) || '—'}
                         </td>
                         <td className="text-muted">{a.email ?? '—'}</td>
@@ -912,11 +949,13 @@ export default function ArchivedPage() {
                               a.status,
                             )}`}
                           >
-                            {a.status}
+                            {statusLabel(a.status)}
                           </span>
-                          <span className="badge bg-danger bg-opacity-10 text-danger ms-1">
-                            Deleted
-                          </span>
+                          {!inactive && (
+                            <span className="badge bg-danger bg-opacity-10 text-danger ms-1">
+                              Archived
+                            </span>
+                          )}
                         </td>
                         <td className="text-muted small">
                           {fmtDate(a.submission_date)}
@@ -938,8 +977,8 @@ export default function ArchivedPage() {
                             <button
                               type="button"
                               className="btn btn-soft text-success"
-                              title="Restore to Applicants"
-                              aria-label="Restore to Applicants"
+                              title="Reactivate"
+                              aria-label="Reactivate"
                               onClick={() => openConfirm('restore', [a.id])}
                               disabled={busy}
                             >
@@ -996,10 +1035,10 @@ export default function ArchivedPage() {
                         style={{ fontSize: '2rem' }}
                       />
                       {all.length === 0
-                        ? 'No deleted applications yet. Records will appear here when applicants are deleted.'
+                        ? 'No inactive records yet. Records appear here when applicants are marked Deceased or Transfer of Residence (TOR).'
                         : filtered.length === 0 && visibleAll.length === 0
-                          ? 'All deleted records are currently hidden. Turn on “Show hidden records” to see them.'
-                          : 'No deleted records match your search.'}
+                          ? 'All inactive records are currently hidden. Turn on “Show hidden records” to see them.'
+                          : 'No inactive records match your search.'}
                     </td>
                   </tr>
                 )}
@@ -1124,11 +1163,11 @@ export default function ArchivedPage() {
         }
         .summary-table td { vertical-align: middle; }
 
-        .deleted-row {
+        .inactive-row {
           background: #fafafa !important;
-          opacity: 0.8;
+          opacity: 0.85;
         }
-        .deleted-row:hover { background: #f5f5f5 !important; }
+        .inactive-row:hover { background: #f5f5f5 !important; }
 
         .hidden-row {
           background: #f1f3f5 !important;

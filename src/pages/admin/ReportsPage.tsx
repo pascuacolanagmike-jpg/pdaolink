@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react'
 import { Bar, Pie } from 'react-chartjs-2'
 import 'chart.js/auto'
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
 import AppLayout from '../../components/AppLayout'
 import { ADMIN_NAV } from '../../lib/nav'
 import { supabase } from '../../lib/supabase'
@@ -97,16 +99,8 @@ function computeAgeFromDob(dob: string): number | null {
   return age
 }
 
-/**
- * Age is always computed from the date of birth when it is available,
- * so the value naturally rolls over on the applicant's birthday.
- * The stored `age` column is only used as a fallback for legacy rows
- * that have no DOB on file.
- */
 function getAge(app: Application): number | null {
   const a = app as any
-
-  // ① DOB first — recalculated against today's date every time
   for (const key of DOB_KEYS) {
     const v = a[key]
     if (typeof v === 'string' && v.trim() !== '') {
@@ -114,13 +108,10 @@ function getAge(app: Application): number | null {
       if (n !== null) return n
     }
   }
-
-  // ② Fallback: stored age, for records without a DOB
   if (a.age !== undefined && a.age !== null && a.age !== '') {
     const n = Number(a.age)
     if (!isNaN(n) && n >= 0 && n <= 130) return Math.floor(n)
   }
-
   return null
 }
 
@@ -147,9 +138,6 @@ const EMPTY_STATS: Stats = {
   disabilityBreakdown: DISABILITY_TYPES.reduce<Record<string, number>>((acc, d) => { acc[d] = 0; return acc }, {}),
 }
 
-/* ─────────────────────────────────────────────────────────────
-   Section IDs for expand/collapse-all
-   ───────────────────────────────────────────────────────────── */
 const SECTION_IDS = [
   'charts',
   'exports',
@@ -198,10 +186,8 @@ export default function ReportsPage() {
 
   useEffect(() => {
     let timer: number
-
     const scheduleMidnightTick = () => {
       const now = new Date()
-      // 00:00:01 local time tomorrow — 1s safety margin after midnight
       const nextMidnight = new Date(
         now.getFullYear(),
         now.getMonth(),
@@ -210,11 +196,10 @@ export default function ReportsPage() {
       )
       const ms = Math.max(1000, nextMidnight.getTime() - now.getTime())
       timer = window.setTimeout(() => {
-        forceTick((n) => n + 1)   // force React to re-render, ages recompute
-        scheduleMidnightTick()     // schedule tomorrow's tick
+        forceTick((n) => n + 1)
+        scheduleMidnightTick()
       }, ms)
     }
-
     scheduleMidnightTick()
     return () => window.clearTimeout(timer)
   }, [])
@@ -456,31 +441,313 @@ export default function ReportsPage() {
     return { data: filteredResult, grandTotal, grandMale, grandFemale }
   }, [filteredApplicants])
 
-  const exportDisabilityStats = () => {
-    const headers = ['Type of Disability', 'Total No. of Individuals', 'Age Range', 'Male', 'Female']
-    const rows: string[][] = []
+  /* ───────── DISABILITY STATISTICS EXPORTS ───────── */
+
+  const exportSuffix = () =>
+    barangayFilter
+      ? `-${barangayFilter.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
+      : ''
+
+  const buildExportRows = () => {
+    const rows: {
+      disability: string
+      total: number
+      male: number
+      female: number
+      brackets: { label: string; male: number; female: number }[]
+    }[] = []
     Object.entries(disabilityStats.data).forEach(([disability, data]: [string, any]) => {
-      AGE_BRACKETS.forEach((bracket, index) => {
-        rows.push([
-          index === 0 ? disability : '',
-          index === 0 ? String(data.total) : '',
-          bracket.label,
-          String(data.brackets[bracket.label].male),
-          String(data.brackets[bracket.label].female),
+      rows.push({
+        disability,
+        total: data.total,
+        male: data.male,
+        female: data.female,
+        brackets: AGE_BRACKETS.map((b) => ({
+          label: b.label,
+          male: data.brackets[b.label]?.male ?? 0,
+          female: data.brackets[b.label]?.female ?? 0,
+        })),
+      })
+    })
+    return rows
+  }
+
+  /* ───────── PDF EXPORT — exact clone of the template ───────── */
+  const exportDisabilityStatsPDF = () => {
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
+    const rows = buildExportRows()
+
+    // Age labels as they appear in the template PDF.
+    // NOTE: "6-Apr" and "12-Jul" match the template (Excel's date bug for
+    // "4-6" / "7-12"). If you want the CORRECT ranges in the PDF too,
+    // change this to: ['0-3','4-6','7-12','13-17','18-30','31-59','60-up']
+    const PDF_AGE_LABELS = ['0-3', '6-Apr', '12-Jul', '13-17', '18-30', '31-59', '60-up']
+
+    // Colour palette (matches the template)
+    const BLUE_HEADER: [number, number, number] = [46, 117, 182]    // #2E75B6
+    const LIGHT_BLUE: [number, number, number] = [155, 194, 230]    // #9BC2E6
+    const BLACK: [number, number, number] = [0, 0, 0]
+
+    // Title
+    doc.setFontSize(13)
+    doc.setFont('helvetica', 'bold')
+    doc.text('Persons with Disabilities Statistics', 40, 40)
+    if (barangayFilter) {
+      doc.setFontSize(10)
+      doc.setFont('helvetica', 'normal')
+      doc.text(`Barangay: ${barangayFilter}`, 40, 56)
+    }
+
+    /* ── Build body: per disability, 7 age rows + TOTAL row ── */
+    const body: any[] = []
+
+    rows.forEach((d) => {
+      d.brackets.forEach((b, index) => {
+        if (index === 0) {
+          body.push([
+            {
+              content: d.disability,
+              rowSpan: d.brackets.length,
+              styles: { valign: 'middle', halign: 'center', fontStyle: 'bold' },
+            },
+            {
+              content: String(d.total),
+              rowSpan: d.brackets.length,
+              styles: { valign: 'top', halign: 'center' },
+            },
+            { content: PDF_AGE_LABELS[index], styles: { halign: 'center' } },
+            { content: String(b.male), styles: { halign: 'center' } },
+            { content: String(b.female), styles: { halign: 'center' } },
+          ])
+        } else {
+          body.push([
+            { content: PDF_AGE_LABELS[index], styles: { halign: 'center' } },
+            { content: String(b.male), styles: { halign: 'center' } },
+            { content: String(b.female), styles: { halign: 'center' } },
+          ])
+        }
+      })
+
+      // Light-blue TOTAL row for this disability
+      body.push([
+        { content: 'TOTAL', styles: { fontStyle: 'bold', halign: 'center', fillColor: LIGHT_BLUE } },
+        { content: String(d.total), styles: { fontStyle: 'bold', halign: 'center', fillColor: LIGHT_BLUE } },
+        { content: '', styles: { fillColor: LIGHT_BLUE } },
+        { content: String(d.male), styles: { fontStyle: 'bold', halign: 'center', fillColor: LIGHT_BLUE } },
+        { content: String(d.female), styles: { fontStyle: 'bold', halign: 'center', fillColor: LIGHT_BLUE } },
+      ])
+    })
+
+    // Light-blue GRAND TOTAL row
+    body.push([
+      { content: 'GRAND TOTAL', styles: { fontStyle: 'bold', halign: 'center', fillColor: LIGHT_BLUE } },
+      { content: String(disabilityStats.grandTotal), styles: { fontStyle: 'bold', halign: 'center', fillColor: LIGHT_BLUE } },
+      { content: '', styles: { fillColor: LIGHT_BLUE } },
+      { content: String(disabilityStats.grandMale), styles: { fontStyle: 'bold', halign: 'center', fillColor: LIGHT_BLUE } },
+      { content: String(disabilityStats.grandFemale), styles: { fontStyle: 'bold', halign: 'center', fillColor: LIGHT_BLUE } },
+    ])
+
+    autoTable(doc, {
+      head: [['Type of Disability', 'Total No. of Individuals', 'Age Range', 'Male', 'Female']],
+      body,
+      startY: barangayFilter ? 76 : 60,
+      margin: { left: 40, right: 40 },
+      tableWidth: 515,
+      styles: {
+        font: 'helvetica',
+        fontSize: 8.5,
+        cellPadding: 5,
+        lineColor: BLACK,
+        lineWidth: 0.5,
+        valign: 'middle',
+        textColor: BLACK,
+        overflow: 'linebreak',
+      },
+      headStyles: {
+        fillColor: BLUE_HEADER,
+        textColor: 255,
+        halign: 'center',
+        valign: 'middle',
+        fontStyle: 'bold',
+        fontSize: 9,
+        cellPadding: 4,
+        minCellHeight: 28,
+        lineColor: BLACK,
+        lineWidth: 0.5,
+      },
+      columnStyles: {
+        0: { cellWidth: 145, halign: 'center', valign: 'middle' },
+        1: { cellWidth: 110, halign: 'center', valign: 'top' },
+        2: { cellWidth: 85,  halign: 'center' },
+        3: { cellWidth: 85,  halign: 'center' },
+        4: { cellWidth: 90,  halign: 'center' },
+      },
+      theme: 'grid',
+    })
+
+    doc.save(`pdaolink-disability-statistics${exportSuffix()}.pdf`)
+  }
+
+  /* ───────── EXCEL EXPORT — styled to match the PDF template ───────── */
+  const exportDisabilityStatsExcel = async () => {
+    try {
+      const ExcelJS = (await import('exceljs')).default
+      const wb = new ExcelJS.Workbook()
+
+      const ws = wb.addWorksheet('Disability Statistics', {
+        views: [{ state: 'frozen', ySplit: 1 }],
+        pageSetup: { orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+      })
+
+      // Column widths (character units — roughly match PDF proportions)
+      ws.columns = [
+        { width: 32 }, // Type of Disability
+        { width: 22 }, // Total No. of Individuals
+        { width: 14 }, // Age Range
+        { width: 10 }, // Male
+        { width: 10 }, // Female
+      ]
+
+      // ── Style palette (mirrors the PDF) ──
+      const BLACK = 'FF000000'
+      const WHITE = 'FFFFFFFF'
+      const HEADER_BG = 'FF2E75B6' // blue header
+      const TOTAL_BG  = 'FF9BC2E6' // light blue TOTAL rows
+
+      const BLACK_BORDER = {
+        top:    { style: 'thin' as const, color: { argb: BLACK } },
+        left:   { style: 'thin' as const, color: { argb: BLACK } },
+        bottom: { style: 'thin' as const, color: { argb: BLACK } },
+        right:  { style: 'thin' as const, color: { argb: BLACK } },
+      }
+
+      // ── Header row ──
+      const headerRow = ws.addRow([
+        'Type of Disability',
+        'Total No. of Individuals',
+        'Age Range',
+        'Male',
+        'Female',
+      ])
+      headerRow.height = 32
+      headerRow.eachCell({ includeEmpty: true }, (cell) => {
+        cell.font = { bold: true, size: 11, color: { argb: WHITE }, name: 'Calibri' }
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADER_BG } }
+        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
+        cell.border = BLACK_BORDER
+      })
+
+      // ── Data blocks ──
+      const rows = buildExportRows()
+      rows.forEach((d) => {
+        const startRow = ws.rowCount + 1 // 1-based row number of first age row
+
+        d.brackets.forEach((b, i) => {
+          const row = ws.addRow([
+            i === 0 ? d.disability : '',
+            i === 0 ? d.total : '',
+            b.label,
+            b.male,
+            b.female,
+          ])
+          row.height = 20
+          row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+            cell.border = BLACK_BORDER
+            cell.font = { size: 10, name: 'Calibri' }
+            cell.alignment = { horizontal: 'center', vertical: 'middle' }
+            // Force age range to text so Excel doesn't turn "4-6"/"7-12" into dates
+            if (colNumber === 3) cell.numFmt = '@'
+            // Disability name — bold, centered, wrapped (will be merged vertically)
+            if (colNumber === 1) {
+              cell.font = { bold: true, size: 10, name: 'Calibri' }
+              cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
+            }
+          })
+        })
+
+        const endRow = ws.rowCount
+
+        // Merge disability name + total across the 7 age rows
+        ws.mergeCells(startRow, 1, endRow, 1)
+        ws.mergeCells(startRow, 2, endRow, 2)
+
+        // ── TOTAL row (light blue) ──
+        const totalRow = ws.addRow(['TOTAL', d.total, '', d.male, d.female])
+        totalRow.height = 20
+        totalRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+          cell.border = BLACK_BORDER
+          cell.font = { bold: true, size: 10, name: 'Calibri' }
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TOTAL_BG } }
+          cell.alignment = { horizontal: 'center', vertical: 'middle' }
+          if (colNumber === 3) cell.numFmt = '@'
+        })
+      })
+
+      // ── GRAND TOTAL row (light blue) ──
+      const grandRow = ws.addRow([
+        'GRAND TOTAL',
+        disabilityStats.grandTotal,
+        '',
+        disabilityStats.grandMale,
+        disabilityStats.grandFemale,
+      ])
+      grandRow.height = 20
+      grandRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+        cell.border = BLACK_BORDER
+        cell.font = { bold: true, size: 10, name: 'Calibri' }
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TOTAL_BG } }
+        cell.alignment = { horizontal: 'center', vertical: 'middle' }
+        if (colNumber === 3) cell.numFmt = '@'
+      })
+
+      // ── Download ──
+      const buffer = await wb.xlsx.writeBuffer()
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `pdaolink-disability-statistics${exportSuffix()}.xlsx`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+    } catch (e: any) {
+      setToast(
+        `Excel export failed: ${e?.message ?? 'unknown error'}. ` +
+        `If it says "Cannot find module 'exceljs'", run: npm install exceljs`
+      )
+    }
+  }
+
+  /* ── CSV (fallback) ── */
+  const exportDisabilityStatsCSV = () => {
+    const headers = ['Type of Disability', 'Total No. of Individuals', 'Age Range', 'Male', 'Female']
+    const csvRows: string[][] = []
+    buildExportRows().forEach((d) => {
+      d.brackets.forEach((b, index) => {
+        csvRows.push([
+          index === 0 ? d.disability : '',
+          index === 0 ? String(d.total) : '',
+          b.label,
+          String(b.male),
+          String(b.female),
         ])
       })
-      rows.push(['TOTAL', String(data.total), '', String(data.male), String(data.female)])
+      csvRows.push(['TOTAL', String(d.total), '', String(d.male), String(d.female)])
     })
-    rows.push(['GRAND TOTAL', String(disabilityStats.grandTotal), '', String(disabilityStats.grandMale), String(disabilityStats.grandFemale)])
-    const csvContent = [headers.join(','), ...rows.map((r) => r.map((cell) => `"${cell}"`).join(','))].join('\n')
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    csvRows.push(['GRAND TOTAL', String(disabilityStats.grandTotal), '', String(disabilityStats.grandMale), String(disabilityStats.grandFemale)])
+
+    const csv = [headers.join(','), ...csvRows.map((r) => r.map((c) => `"${c}"`).join(','))].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const link = document.createElement('a')
     const url = URL.createObjectURL(blob)
-    const suffix = barangayFilter ? `-${barangayFilter.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}` : ''
-    link.setAttribute('href', url)
-    link.setAttribute('download', `pdaolink-disability-statistics${suffix}.csv`)
-    link.style.visibility = 'hidden'
-    document.body.appendChild(link); link.click(); document.body.removeChild(link)
+    link.href = url
+    link.download = `pdaolink-disability-statistics${exportSuffix()}.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
   }
 
   const agesInFiltered = filteredApplicants.map((a) => getAge(a)).filter((n): n is number => n !== null)
@@ -595,7 +862,7 @@ export default function ReportsPage() {
           </div>
         )}
 
-        {/* ─── Overview stats (always visible, compact) ─── */}
+        {/* ─── Overview stats ─── */}
         <div className="row g-2 g-md-3 mb-3">
           <StatBox label="Total" value={stats.total} color="primary" />
           <StatBox label="Daily" value={stats.daily} color="info" />
@@ -793,12 +1060,35 @@ export default function ReportsPage() {
           onToggle={toggleSection}
           className="mb-3"
           headerExtra={
-            <button
-              className="btn btn-sm btn-soft"
-              onClick={(e) => { e.stopPropagation(); exportDisabilityStats() }}
+            <div
+              className="btn-group btn-group-sm"
+              onClick={(e) => e.stopPropagation()}
             >
-              <i className="bi bi-file-earmark-spreadsheet me-1" /> Export
-            </button>
+              <button
+                className="btn btn-soft"
+                onClick={exportDisabilityStatsPDF}
+                title="Export as PDF"
+                disabled={disabilityStats.grandTotal === 0}
+              >
+                <i className="bi bi-file-pdf me-1" /> PDF
+              </button>
+              <button
+                className="btn btn-soft"
+                onClick={exportDisabilityStatsExcel}
+                title="Export as Excel"
+                disabled={disabilityStats.grandTotal === 0}
+              >
+                <i className="bi bi-file-earmark-spreadsheet me-1" /> Excel
+              </button>
+              <button
+                className="btn btn-soft"
+                onClick={exportDisabilityStatsCSV}
+                title="Export as CSV"
+                disabled={disabilityStats.grandTotal === 0}
+              >
+                <i className="bi bi-filetype-csv me-1" /> CSV
+              </button>
+            </div>
           }
         >
           <div className="d-flex flex-column flex-lg-row gap-4 align-items-start">
@@ -906,7 +1196,6 @@ export default function ReportsPage() {
             </div>
           }
         >
-          {/* Summary chips always visible */}
           <div className="summary-chips mb-3">
             <span className="chip chip-primary"><strong>{filteredCounts.total}</strong> total</span>
             <span className="chip chip-blue"><i className="bi bi-gender-male me-1" /><strong>{filteredCounts.male}</strong> male</span>
@@ -927,7 +1216,6 @@ export default function ReportsPage() {
             )}
           </div>
 
-          {/* Collapsible filter panel */}
           <div className={`filter-panel ${filtersOpen ? 'open' : ''}`}>
             <button
               type="button"
@@ -952,7 +1240,6 @@ export default function ReportsPage() {
 
             {filtersOpen && (
               <div className="filter-panel-body">
-                {/* Row 1 */}
                 <div className="row g-3 mb-3">
                   <div className="col-md-3">
                     <label className="form-label small text-muted">Name</label>
@@ -987,7 +1274,6 @@ export default function ReportsPage() {
                   </div>
                 </div>
 
-                {/* Row 2 */}
                 <div className="row g-3 mb-3">
                   <div className="col-md-3">
                     <label className="form-label small text-muted">Address (street / municipality)</label>
@@ -1020,7 +1306,6 @@ export default function ReportsPage() {
                   </div>
                 </div>
 
-                {/* Row 3 */}
                 <div className="row g-3">
                   <div className="col-md-3">
                     <label className="form-label small text-muted">Educational Attainment</label>
@@ -1105,7 +1390,6 @@ export default function ReportsPage() {
             )}
           </div>
 
-          {/* Table */}
           <div className="mt-3">
             {filteredApplicants.length > 0 ? (
               <div className="table-responsive">

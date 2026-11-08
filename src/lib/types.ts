@@ -7,6 +7,8 @@ export type ApplicationStatus =
   | 'Approved'
   | 'Rejected'
   | 'Ready for Pickup'
+  | 'Deceased'
+  | 'Transferred'    // DB value; display label is "Transfer of Residence (TOR)"
 
 export const ALL_STATUSES: ApplicationStatus[] = [
   'Pending',
@@ -15,7 +17,43 @@ export const ALL_STATUSES: ApplicationStatus[] = [
   'Approved',
   'Rejected',
   'Ready for Pickup',
+  'Deceased',
+  'Transferred',
 ]
+
+// ─────────────────────────────────────────────────────────
+// Display labels — what admins and applicants see in the UI.
+// The DB/URL value stays as the key (e.g. 'Transferred');
+// the human-facing string lives here so it can evolve without
+// a data migration.
+// ─────────────────────────────────────────────────────────
+export const STATUS_LABELS: Record<ApplicationStatus, string> = {
+  Pending: 'Pending',
+  'Under Review': 'Under Review',
+  'Needs Revision': 'Needs Revision',
+  Approved: 'Approved',
+  Rejected: 'Rejected',
+  'Ready for Pickup': 'Ready for Pickup',
+  Deceased: 'Deceased',
+  Transferred: 'Transfer of Residence (TOR)',
+}
+
+export function statusLabel(status: string): string {
+  return (STATUS_LABELS as Record<string, string>)[status] ?? status
+}
+
+// ─────────────────────────────────────────────────────────
+// Inactive (terminal) statuses — the applicant is no longer
+// in the active caseload. Records in these states are hidden
+// from the Applicants list (is_deleted = true) and shown on
+// the Archived / Inactive page.
+// ─────────────────────────────────────────────────────────
+export const INACTIVE_STATUSES = ['Deceased', 'Transferred'] as const
+export type InactiveStatus = (typeof INACTIVE_STATUSES)[number]
+
+export function isInactiveStatus(status: string): status is InactiveStatus {
+  return (INACTIVE_STATUSES as readonly string[]).includes(status)
+}
 
 // --- DOH PWD Registration Form v4.0 constants ---
 
@@ -401,6 +439,8 @@ export function statusColor(status: string): string {
     Approved: 'bg-success',
     Rejected: 'bg-danger',
     'Ready for Pickup': 'bg-primary',
+    Deceased: 'bg-dark',
+    Transferred: 'bg-secondary',
   }
   return map[status] ?? 'bg-secondary'
 }

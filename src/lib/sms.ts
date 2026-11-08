@@ -2,13 +2,24 @@
 // ─────────────────────────────────────────────────────────────────────────
 // ⚠️  DIRECT FRONTEND CALL — API key is exposed in the browser bundle.
 //     Fine for testing / internal use. Do NOT ship to public users as-is.
-//     To upgrade later: replace the fetch() below with
-//     supabase.functions.invoke('send-sms', { body: { to, message } })
+//     To upgrade later: replace the fetch() inside postToTextbee() with
+//       supabase.functions.invoke('send-sms', { body: { to, message } })
 //     — everything else in this file stays identical.
 // ─────────────────────────────────────────────────────────────────────────
 
-export type SmsOutcome = 'approved' | 'rejected' | 'resubmit'
+// ─── API key resolution ───
+// Prefer the env var. Fall back to the hardcoded key so the app works
+// during testing. The fallback key is temporary — revoke it once you've
+// set VITE_TEXTBEE_API_KEY in .env.local and restarted the dev server.
+const ENV_API_KEY = import.meta.env.VITE_TEXTBEE_API_KEY as string | undefined
+const FALLBACK_API_KEY = 'txb_jPSZ0G0RpWelmxrqlrvMnkLuCxQZA0rf'
+const TEXTBEE_URL = 'https://api.textbee.dev/api/v1/gateway/send-sms'
 
+// ─── Public types ───
+export type SmsOutcome = 'approved' | 'rejected' | 'resubmit'
+export type DocSmsOutcome = 'approved' | 'rejected' | 'resubmit'
+
+// ─── Verification (account-level) ───
 interface SendVerificationSmsParams {
   outcome: SmsOutcome
   toPhone: string
@@ -25,48 +36,74 @@ const OUTCOME_TEMPLATES: Record<SmsOutcome, (firstName: string) => string> = {
     `Hi ${name}, PDAOLink needs updated documents to finish verifying your account. Check your email for instructions.`,
 }
 
-const TEXTBEE_URL = 'https://api.textbee.dev/api/v1/gateway/send-sms'
+// ─── Document (per-file) ───
+interface SendDocumentSmsParams {
+  outcome: DocSmsOutcome
+  toPhone: string
+  toName?: string | null
+  /** Human label, e.g. "1x1 Picture (2 pcs)" — pass prettyDocType(...) */
+  documentType: string
+  /** Admin remarks / reason — only appended for rejected / resubmit */
+  message?: string | null
+}
 
-export async function sendVerificationSms({
-  outcome,
-  toPhone,
-  toName,
-  message,
-}: SendVerificationSmsParams): Promise<{ ok: boolean; error?: string }> {
+const DOC_OUTCOME_TEMPLATES: Record<
+  DocSmsOutcome,
+  (firstName: string, docType: string) => string
+> = {
+  approved: (name, docType) =>
+    `Hi ${name}, your document "${docType}" has been APPROVED by PDAO.`,
+  rejected: (name, docType) =>
+    `Hi ${name}, your document "${docType}" was REJECTED by PDAO. Please re-upload a corrected copy.`,
+  resubmit: (name, docType) =>
+    `Hi ${name}, please RE-UPLOAD your document "${docType}" for review by PDAO.`,
+}
+
+// ─── Internals ───
+function resolveApiKey(): string | null {
+  const key = ENV_API_KEY || FALLBACK_API_KEY
+  if (!key) {
+    console.error(
+      '[sms] No Textbee API key found. Set VITE_TEXTBEE_API_KEY in .env.local.'
+    )
+    return null
+  }
+  if (!ENV_API_KEY) {
+    console.warn(
+      '[sms] Using hardcoded fallback API key — move to VITE_TEXTBEE_API_KEY in .env.local.'
+    )
+  }
+  return key
+}
+
+function normalizePhone(raw: string): { e164: string | null; error?: string } {
+  let to = raw.trim().replace(/[\s\-()]/g, '')
+  if (to.startsWith('0') && !to.startsWith('+')) to = '+63' + to.slice(1)
+  if (!to.startsWith('+')) to = '+63' + to.replace(/^63/, '')
+  if (!/^\+\d{10,15}$/.test(to)) {
+    return {
+      e164: null,
+      error: `Invalid phone number format: "${raw}" → "${to}". Must be E.164 like +639171234567.`,
+    }
+  }
+  return { e164: to }
+}
+
+const truncate = (s: string, max = 300) =>
+  s.length > max ? s.slice(0, max - 3) + '…' : s
+
+const firstNameOf = (name?: string | null) =>
+  (name ?? '').trim().split(' ')[0] || 'there'
+
+async function postToTextbee(
+  to: string,
+  body: string
+): Promise<{ ok: boolean; error?: string }> {
+  const apiKey = resolveApiKey()
+  if (!apiKey) return { ok: false, error: 'Missing Textbee API key.' }
+
   try {
-    // ─── 1. Validate key presence early with a clear error ───
-    const apiKey = import.meta.env.VITE_TEXTBEE_API_KEY as string | undefined
-    if (!apiKey) {
-      const msg =
-        'VITE_TEXTBEE_API_KEY is not set. Add it to .env.local and restart the dev server.'
-      console.error('[sms]', msg)
-      return { ok: false, error: msg }
-    }
-
-    // ─── 2. Build the message ───
-    const firstName = (toName ?? '').trim().split(' ')[0] || 'there'
-    let body = OUTCOME_TEMPLATES[outcome](firstName)
-
-    if ((outcome === 'rejected' || outcome === 'resubmit') && message) {
-      const trimmed = message.trim().slice(0, 120)
-      body += ` Reason: ${trimmed}${message.length > 120 ? '…' : ''}`
-    }
-    if (body.length > 300) body = body.slice(0, 297) + '…'
-
-    // ─── 3. Normalize phone to E.164 (defensive — DB should already be E.164) ───
-    let to = toPhone.trim().replace(/[\s\-()]/g, '')
-    if (to.startsWith('0') && !to.startsWith('+')) to = '+63' + to.slice(1)
-    if (!to.startsWith('+')) to = '+63' + to.replace(/^63/, '')
-
-    if (!/^\+\d{10,15}$/.test(to)) {
-      const msg = `Invalid phone number format: "${toPhone}" → "${to}". Must be E.164 like +639171234567.`
-      console.error('[sms]', msg)
-      return { ok: false, error: msg }
-    }
-
-    // ─── 4. Call TextBee ───
     console.log('[sms] sending to', to, '→', body.slice(0, 60) + '…')
-
     const resp = await fetch(TEXTBEE_URL, {
       method: 'POST',
       headers: {
@@ -79,7 +116,8 @@ export async function sendVerificationSms({
     const data = await resp.json().catch(() => ({}))
 
     if (!resp.ok) {
-      const errMsg = data?.message ?? `TextBee returned ${resp.status}`
+      const errMsg =
+        (data as any)?.message ?? `TextBee returned ${resp.status}`
       console.error('[sms] TextBee error:', resp.status, data)
       return { ok: false, error: errMsg }
     }
@@ -91,4 +129,53 @@ export async function sendVerificationSms({
     console.error('[sms] exception:', msg, err)
     return { ok: false, error: msg }
   }
+}
+
+// ─── Public senders ───
+export async function sendVerificationSms({
+  outcome,
+  toPhone,
+  toName,
+  message,
+}: SendVerificationSmsParams): Promise<{ ok: boolean; error?: string }> {
+  const phone = normalizePhone(toPhone)
+  if (!phone.e164) {
+    console.error('[sms]', phone.error)
+    return { ok: false, error: phone.error }
+  }
+
+  let body = OUTCOME_TEMPLATES[outcome](firstNameOf(toName))
+
+  if ((outcome === 'rejected' || outcome === 'resubmit') && message?.trim()) {
+    const reason = message.trim().slice(0, 120)
+    body += ` Reason: ${reason}${message.length > 120 ? '…' : ''}`
+  }
+
+  return postToTextbee(phone.e164, truncate(body))
+}
+
+export async function sendDocumentSms({
+  outcome,
+  toPhone,
+  toName,
+  documentType,
+  message,
+}: SendDocumentSmsParams): Promise<{ ok: boolean; error?: string }> {
+  const phone = normalizePhone(toPhone)
+  if (!phone.e164) {
+    console.error('[sms]', phone.error)
+    return { ok: false, error: phone.error }
+  }
+
+  let body = DOC_OUTCOME_TEMPLATES[outcome](
+    firstNameOf(toName),
+    documentType
+  )
+
+  if ((outcome === 'rejected' || outcome === 'resubmit') && message?.trim()) {
+    const reason = message.trim().slice(0, 120)
+    body += ` Reason: ${reason}${message.length > 120 ? '…' : ''}`
+  }
+
+  return postToTextbee(phone.e164, truncate(body))
 }

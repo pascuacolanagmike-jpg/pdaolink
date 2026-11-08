@@ -231,6 +231,8 @@ function toApplicationInput(app: Application): ApplicationInput {
   result.region = LOCKED_REGION
   result.assistance_received_source = ''
   result.assistance_needed_source = ''
+  // Normalize physician license no. to digits only (legacy data safety)
+  result.physician_license_no = String(result.physician_license_no ?? '').replace(/\D/g, '')
   return result
 }
 
@@ -337,6 +339,11 @@ export default function ApplicationPage() {
 
   const set = (field: keyof ApplicationInput, value: string) => {
     setForm((f) => ({ ...f, [field]: value }))
+  }
+
+  // Same as `set`, but strips any non-digit characters (0-9 only)
+  const setDigits = (field: keyof ApplicationInput, value: string) => {
+    setForm((f) => ({ ...f, [field]: value.replace(/\D/g, '') }))
   }
 
   const toggleArray = (field: ArrayField, value: string) => {
@@ -457,6 +464,8 @@ export default function ApplicationPage() {
       assistance_needed_source: '',
       assistance_received: normalizeAssist(form.assistance_received),
       assistance_needed: normalizeAssist(form.assistance_needed),
+      // Ensure physician license no. is digits only at save-time
+      physician_license_no: (form.physician_license_no ?? '').replace(/\D/g, ''),
     }
 
     let appId: string
@@ -896,7 +905,15 @@ export default function ApplicationPage() {
                   <input className="form-control" value={form.physician_name ?? ''} onChange={(e) => set('physician_name', e.target.value)} required />
                 </FormCol>
                 <FormCol md={4} label="License No." required>
-                  <input className="form-control" value={form.physician_license_no ?? ''} onChange={(e) => set('physician_license_no', e.target.value)} required />
+                  <input
+                    className="form-control"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={form.physician_license_no ?? ''}
+                    onChange={(e) => setDigits('physician_license_no', e.target.value)}
+                    placeholder="Numbers only"
+                    required
+                  />
                 </FormCol>
               </div>
             </FormCard>

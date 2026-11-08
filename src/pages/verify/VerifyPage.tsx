@@ -11,6 +11,32 @@ const SLOTS: { key: Slot; label: string; hint: string }[] = [
   { key: 'medical_abstract', label: 'Medical abstract',  hint: 'Signed by your physician' },
 ]
 
+// ─── NEW: allowed file types (PDF / JPG / PNG only) ───
+const ALLOWED_MIME = ['application/pdf', 'image/jpeg', 'image/png'] as const
+type AllowedMime = (typeof ALLOWED_MIME)[number]
+
+const EXT_BY_MIME: Record<AllowedMime, string> = {
+  'application/pdf': 'pdf',
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+}
+
+// Some browsers/OSes leave file.type empty, so fall back to the extension
+const EXT_TO_MIME: Record<string, AllowedMime> = {
+  pdf: 'application/pdf',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+}
+
+function resolveMime(file: File): AllowedMime | null {
+  if (ALLOWED_MIME.includes(file.type as AllowedMime)) return file.type as AllowedMime
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+  return EXT_TO_MIME[ext] ?? null
+}
+
+const MAX_FILE_BYTES = 10 * 1024 * 1024 // 10 MB
+
 export default function VerifyPage() {
   const { user, profile, refreshProfile } = useAuth()
   const navigate = useNavigate()
@@ -42,15 +68,29 @@ export default function VerifyPage() {
 
   async function upload(slot: Slot, file: File) {
     if (!user) return
-    setBusy(slot)
     setError(null)
+
+    // ─── NEW: enforce PDF / JPG / PNG ───
+    const mime = resolveMime(file)
+    if (!mime) {
+      setError('Only PDF, JPG, or PNG files are allowed.')
+      return
+    }
+
+    // ─── NEW: enforce max size ───
+    if (file.size > MAX_FILE_BYTES) {
+      setError('File must be 10 MB or smaller.')
+      return
+    }
+
+    setBusy(slot)
     try {
-      const ext = file.name.split('.').pop()
+      const ext = EXT_BY_MIME[mime]
       const path = `${user.id}/${slot}.${ext}`
 
       const { error: upErr } = await supabase.storage
         .from('verification-docs')
-        .upload(path, file, { upsert: true, contentType: file.type })
+        .upload(path, file, { upsert: true, contentType: mime })
       if (upErr) throw upErr
 
       const { error: dbErr } = await supabase
@@ -138,9 +178,14 @@ export default function VerifyPage() {
                   <i className="bi bi-upload me-1" /> Choose file
                   <input
                     type="file"
-                    accept="image/*,application/pdf"
+                    accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png"
                     hidden
-                    onChange={e => e.target.files?.[0] && upload(s.key, e.target.files[0])}
+                    onChange={e => {
+                      const f = e.target.files?.[0]
+                      if (f) upload(s.key, f)
+                      // reset so the same file can be re-picked after an error
+                      e.target.value = ''
+                    }}
                   />
                 </label>
               )}

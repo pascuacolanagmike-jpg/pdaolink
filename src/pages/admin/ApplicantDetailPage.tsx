@@ -1,4 +1,4 @@
-import { useEffect, useState, FormEvent, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import AppLayout from '../../components/AppLayout'
 import Alert from '../../components/Alert'
@@ -6,8 +6,11 @@ import DocumentReviewModal from '../../components/DocumentReviewModal'
 import { ADMIN_NAV } from '../../lib/nav'
 import { useAuth } from '../../lib/auth'
 import { supabase } from '../../lib/supabase'
+import { sendDocumentSms } from '../../lib/sms'
 import {
   statusColor,
+  statusLabel,
+  isInactiveStatus,
   docStatusBadge,
   DOC_STATUS_LABEL,
   fmtDateTime,
@@ -39,9 +42,37 @@ const DISABILITY_TYPES = [
 const CONGENITAL_CAUSES = ['ADHD', 'Cerebral Palsy', 'Down Syndrome', 'Others']
 const ACQUIRED_CAUSES = ['Chronic Illness', 'Cerebral Palsy', 'Injury', 'Others']
 
-// ─────────────────────────────────────────────────────────
-// Assistance tree — must match the client-side form exactly
-// ─────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// FINAL / DONE STATUSES
+// Once an application reaches one of these, the STATUS DECISION
+// surface (form + quick actions) is permanently locked — but
+// document review stays editable (see below).
+// ─────────────────────────────────────────────────────────────
+const FINAL_STATUSES = ['Approved', 'Rejected', 'Ready for Pickup'] as const
+const isFinalStatus = (status: string) =>
+  (FINAL_STATUSES as readonly string[]).includes(status)
+
+// ─────────────────────────────────────────────────────────────
+// CONFIRMATION WORDS
+// Final / destructive actions require the admin to type the
+// matching word before the action can be applied. This guards
+// against accidental clicks. Edit or remove entries here to
+// change which actions need confirmation.
+// ─────────────────────────────────────────────────────────────
+const CONFIRM_WORD: Record<string, string> = {
+  Approved: 'APPROVED',
+  Rejected: 'REJECTED',
+  'Needs Revision': 'REVISION',
+  'Ready for Pickup': 'PICKUP',
+}
+
+const STATUS_BUTTON_VARIANT: Record<string, string> = {
+  Approved: 'btn-success',
+  Rejected: 'btn-danger',
+  'Needs Revision': 'btn-warning',
+  'Ready for Pickup': 'btn-primary',
+}
+
 interface AssistanceNode {
   key: string
   label: string
@@ -115,9 +146,6 @@ const ASSISTANCE_TREE: AssistanceNode[] = [
   },
 ]
 
-// ─────────────────────────────────────────────────────────
-// Assistance helpers — new format is `govt:<leafKey>` / `ngo:<leafKey>`
-// ─────────────────────────────────────────────────────────
 type AssistanceSource = 'govt' | 'ngo'
 const SOURCES: AssistanceSource[] = ['govt', 'ngo']
 const SOURCE_LABEL: Record<AssistanceSource, string> = { govt: "Gov't", ngo: 'NGO' }
@@ -160,9 +188,6 @@ function findAssistanceCategory(
   return ''
 }
 
-// ─────────────────────────────────────────────────────────
-// Section IDs — every collapsible block on the page
-// ─────────────────────────────────────────────────────────
 const FORM_SECTIONS = [
   'app-type', 'personal', 'disability', 'cause', 'address', 'contact',
   'education', 'employment', 'occupation', 'organization', 'ids',
@@ -178,10 +203,6 @@ const DEFAULT_OPEN = new Set<string>(['personal', 'disability', 'assistance', 'd
 const dash = (v: unknown) =>
   typeof v === 'string' && v.trim() ? v : '—'
 
-// ─────────────────────────────────────────────────────────
-// EmailJS — default message per status (used when the admin
-// does not provide a custom email message).
-// ─────────────────────────────────────────────────────────
 const STATUS_EMAIL_MESSAGES: Record<string, string> = {
   Approved: 'Congratulations! Your PWD application has been approved.',
   Rejected:
@@ -190,6 +211,12 @@ const STATUS_EMAIL_MESSAGES: Record<string, string> = {
     'Your application needs some revisions before it can be processed. Please review the remarks below and resubmit.',
   'Ready for Pickup':
     'Your PWD ID is now ready for pickup at the PDAO office.',
+}
+
+const FINAL_ALERT_VARIANT: Record<string, string> = {
+  Approved: 'alert-success',
+  Rejected: 'alert-danger',
+  'Ready for Pickup': 'alert-info',
 }
 
 export default function ApplicantDetailPage() {
@@ -201,43 +228,74 @@ export default function ApplicantDetailPage() {
   const [loading, setLoading] = useState(true)
   const [newStatus, setNewStatus] = useState('')
   const [remarks, setRemarks] = useState('')
-  // Knob 2 — admin-editable one-time email body. Not persisted.
   const [customEmailMessage, setCustomEmailMessage] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [reviewing, setReviewing] = useState<DocumentRow | null>(null)
   const [openSections, setOpenSections] = useState<Set<string>>(() => new Set(DEFAULT_OPEN))
 
+  // Confirmation modal state
+  const [confirmTarget, setConfirmTarget] = useState<string | null>(null)
+  const [confirmInput, setConfirmInput] = useState('')
+
+  // ── Load applicant + documents + logs ──
   useEffect(() => {
-    if (!id) return
-    ;(async () => {
-      const { data: a } = await supabase
-        .from('applications')
-        .select('*')
-        .eq('id', id)
-        .maybeSingle()
-      const appData = a as Application | null
-      setApp(appData)
-      setNewStatus(appData?.status ?? 'Pending')
-      setRemarks(appData?.remarks ?? '')
-      if (appData) {
-        const [d, l] = await Promise.all([
-          supabase
-            .from('documents')
-            .select('*')
-            .eq('application_id', appData.id)
-            .order('uploaded_at', { ascending: false }),
-          supabase
-            .from('status_logs')
-            .select('*')
-            .eq('application_id', appData.id)
-            .order('created_at', { ascending: false }),
-        ])
-        setDocuments((d.data ?? []) as DocumentRow[])
-        setLogs((l.data ?? []) as StatusLog[])
-      }
+    if (!id) {
+      console.error('ApplicantDetailPage: no `id` param found in URL.')
+      setError('No application ID found in the URL. Navigate from the Applicants list.')
       setLoading(false)
+      return
+    }
+
+    let cancelled = false
+
+    ;(async () => {
+      try {
+        const { data: a, error: qErr } = await supabase
+          .from('applications')
+          .select('*')
+          .eq('id', id)
+          .maybeSingle()
+
+        if (cancelled) return
+        if (qErr) throw qErr
+
+        const appData = a as Application | null
+        setApp(appData)
+        setNewStatus(appData?.status ?? 'Pending')
+        setRemarks(appData?.remarks ?? '')
+
+        if (appData) {
+          const [d, l] = await Promise.all([
+            supabase
+              .from('documents')
+              .select('*')
+              .eq('application_id', appData.id)
+              .order('uploaded_at', { ascending: false }),
+            supabase
+              .from('status_logs')
+              .select('*')
+              .eq('application_id', appData.id)
+              .order('created_at', { ascending: false }),
+          ])
+          if (cancelled) return
+          setDocuments((d.data ?? []) as DocumentRow[])
+          setLogs((l.data ?? []) as StatusLog[])
+        }
+      } catch (err) {
+        if (cancelled) return
+        console.error('Failed to load applicant:', err)
+        setError(
+          err instanceof Error ? err.message : 'Failed to load applicant.'
+        )
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
     })()
+
+    return () => {
+      cancelled = true
+    }
   }, [id])
 
   const toggleSection = (sid: string) =>
@@ -251,13 +309,33 @@ export default function ApplicantDetailPage() {
   const expandAll = () => setOpenSections(new Set(ALL_SECTION_IDS))
   const collapseAll = () => setOpenSections(new Set())
 
-  const updateStatus = async (e?: FormEvent, status?: string) => {
-    e?.preventDefault()
+  // ─────────────────────────────────────────────────────────
+  // requestStatus — the single entry point for any status change.
+  // Runs the guards (inactive / finalized / remarks required),
+  // then either opens the confirmation modal (for final actions)
+  // or applies the change immediately (for safe statuses).
+  // ─────────────────────────────────────────────────────────
+  const requestStatus = (target: string) => {
     if (!app || !profile) return
-    const target = status ?? newStatus
+
+    if (isInactiveStatus(app.status)) {
+      setError(
+        `This applicant is marked ${statusLabel(app.status)}. ` +
+          'Reactivate them from the Inactive page before changing status.'
+      )
+      return
+    }
+
+    if (isFinalStatus(app.status)) {
+      setError(
+        `This application is already ${statusLabel(app.status)}. ` +
+          'The status decision is final — but document review is still available below.'
+      )
+      return
+    }
+
     if (!ALL_STATUSES.includes(target as any)) return
 
-    // Require remarks for negative statuses so the applicant knows WHY
     const requiresRemarks = target === 'Rejected' || target === 'Needs Revision'
     if (requiresRemarks && !remarks.trim()) {
       setError(
@@ -266,18 +344,90 @@ export default function ApplicantDetailPage() {
       return
     }
 
+    // Final / destructive actions require typing a confirm word.
+    if (CONFIRM_WORD[target]) {
+      setError(null)
+      setConfirmInput('')
+      setConfirmTarget(target)
+      return
+    }
+
+    // Safe statuses (Under Review, Pending, etc.) apply immediately.
+    void updateStatus(target)
+  }
+
+  const closeConfirm = () => {
+    if (saving) return
+    setConfirmTarget(null)
+    setConfirmInput('')
+    setError(null)
+  }
+
+  const confirmAction = async () => {
+    if (!confirmTarget) return
+    const ok = await updateStatus(confirmTarget)
+    if (ok) {
+      setConfirmTarget(null)
+      setConfirmInput('')
+      setError(null)
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // updateStatus — actually applies the change. Runs the guards
+  // again (defense in depth) and returns true on success so the
+  // confirmation modal knows whether to close.
+  // ─────────────────────────────────────────────────────────
+  const updateStatus = async (target: string): Promise<boolean> => {
+    if (!app || !profile) return false
+
+    if (isInactiveStatus(app.status)) {
+      setError(
+        `This applicant is marked ${statusLabel(app.status)}. ` +
+          'Reactivate them from the Inactive page before changing status.'
+      )
+      return false
+    }
+
+    if (isFinalStatus(app.status)) {
+      setError(
+        `This application is already ${statusLabel(app.status)}. ` +
+          'The status decision is final — but document review is still available below.'
+      )
+      return false
+    }
+
+    if (!ALL_STATUSES.includes(target as any)) return false
+
+    const requiresRemarks = target === 'Rejected' || target === 'Needs Revision'
+    if (requiresRemarks && !remarks.trim()) {
+      setError(
+        `Please provide remarks explaining why this application is "${target}".`
+      )
+      return false
+    }
+
     setSaving(true)
     setError(null)
     const old = app.status
 
-    const { error: uErr } = await supabase
+    const { data: updated, error: uErr } = await supabase
       .from('applications')
       .update({ status: target, remarks, last_updated: new Date().toISOString() })
       .eq('id', app.id)
+      .select('id')
+
     if (uErr) {
       setError(uErr.message)
       setSaving(false)
-      return
+      return false
+    }
+    if (!updated || updated.length === 0) {
+      setError(
+        'Status update was blocked by the database (Row Level Security returned zero rows). Nothing was saved.'
+      )
+      setSaving(false)
+      return false
     }
 
     await supabase.from('status_logs').insert({
@@ -297,15 +447,14 @@ export default function ApplicantDetailPage() {
       Pending: 'Your application status was reset to Pending.',
     }
 
-    // In-app notification (include remarks if present)
-    const baseMessage = msgMap[target] ?? `Application status updated to ${target}.`
+    const baseMessage = msgMap[target] ?? `Application status updated to ${statusLabel(target)}.`
     const notifMessage = remarks.trim()
       ? `${baseMessage} Remarks: ${remarks.trim()}`
       : baseMessage
 
     const { error: notifErr } = await supabase.from('notifications').insert({
       user_id: app.user_id,
-      title: `Application ${target}`,
+      title: `Application ${statusLabel(target)}`,
       message: notifMessage,
       link: '/status',
       type: 'status_update',
@@ -314,20 +463,11 @@ export default function ApplicantDetailPage() {
       console.error('NOTIF INSERT FAILED:', notifErr)
     }
 
-    // ── Send status-update email via EmailJS (separate account) ──
-    // Single dynamic template — pass status-specific values as variables.
     try {
       const emailBody =
         customEmailMessage.trim() ||
         STATUS_EMAIL_MESSAGES[target] ||
-        `Your application status is now ${target}.`
-
-      // Debug — remove once confirmed working
-      console.log('EMAILJS DEBUG', {
-        service: import.meta.env.VITE_EMAILJS_STATUS_SERVICE_ID,
-        template: import.meta.env.VITE_EMAILJS_STATUS_TEMPLATE_ID,
-        key: import.meta.env.VITE_EMAILJS_STATUS_PUBLIC_KEY,
-      })
+        `Your application status is now ${statusLabel(target)}.`
 
       await emailjs.send(
         import.meta.env.VITE_EMAILJS_STATUS_SERVICE_ID,
@@ -335,14 +475,13 @@ export default function ApplicantDetailPage() {
         {
           to_email: app.email,
           applicant_name: appFullName(app),
-          status: target,
+          status: statusLabel(target),
           message: emailBody,
           remarks: remarks || '',
         },
         import.meta.env.VITE_EMAILJS_STATUS_PUBLIC_KEY
       )
     } catch (emailErr) {
-      // Don't block status update if email fails
       console.error('Failed to send status email:', emailErr)
       setError(
         'Status updated successfully, but the email notification could not be sent.'
@@ -350,7 +489,7 @@ export default function ApplicantDetailPage() {
     }
 
     setApp({ ...app, status: target as any, remarks })
-    setCustomEmailMessage('') // clear one-time message
+    setCustomEmailMessage('')
     setSaving(false)
     const { data: newLogs } = await supabase
       .from('status_logs')
@@ -358,6 +497,7 @@ export default function ApplicantDetailPage() {
       .eq('application_id', app.id)
       .order('created_at', { ascending: false })
     setLogs((newLogs ?? []) as StatusLog[])
+    return true
   }
 
   const viewDocument = async (doc: DocumentRow) => {
@@ -371,8 +511,54 @@ export default function ApplicantDetailPage() {
     window.open(data.signedUrl, '_blank')
   }
 
-  const handleDocReviewed = (updated: DocumentRow) => {
+  // ─────────────────────────────────────────────────────────
+  // Document review handler — updates the row and (optionally)
+  // fires a Textbee SMS notification to the applicant when the
+  // status changes to approved or rejected.
+  //
+  // Document review stays editable even when the APPLICATION is
+  // finalized (Approved/Rejected/Ready for Pickup). Only inactive
+  // records (Deceased/Transferred) block review.
+  // ─────────────────────────────────────────────────────────
+  const handleDocReviewed = async (updated: DocumentRow) => {
+    if (app && isInactiveStatus(app.status)) {
+      setError(
+        'This applicant is inactive. Document review changes are disabled.'
+      )
+      return
+    }
+
+    const before = reviewing
+
     setDocuments((docs) => docs.map((d) => (d.id === updated.id ? updated : d)))
+
+    const statusChanged = before && before.status !== updated.status
+    const isFinal =
+      updated.status === 'approved' || updated.status === 'rejected'
+
+    if (!statusChanged || !isFinal) return
+
+    const phone = app?.contact_number || (app as any)?.mobile_no
+    if (!phone) {
+      console.warn('[doc review] No phone on file — SMS skipped.')
+      return
+    }
+
+    if (!app) return
+
+    const sms = await sendDocumentSms({
+      outcome: updated.status as 'approved' | 'rejected',
+      toPhone: phone,
+      toName: appFullName(app),
+      documentType: prettyDocType(updated.document_type),
+      message: updated.review_remarks,
+    })
+
+    if (!sms.ok) {
+      setError(
+        `Document ${updated.status}, but SMS notification failed: ${sms.error}.`
+      )
+    }
   }
 
   if (loading) {
@@ -387,7 +573,7 @@ export default function ApplicantDetailPage() {
   if (!app) {
     return (
       <AppLayout navItems={ADMIN_NAV}>
-        <Alert variant="danger" message="Application not found." />
+        <Alert variant="danger" message={error ?? 'Application not found.'} />
       </AppLayout>
     )
   }
@@ -399,6 +585,9 @@ export default function ApplicantDetailPage() {
 
   const pendingCount = documents.filter((d) => d.status === 'pending').length
   const anyOpen = openSections.size > 0
+  const inactive = isInactiveStatus(app.status)
+  const finalized = isFinalStatus(app.status)
+  const docLocked = inactive
 
   const disabilityArr = getArray('disability_types')
   const receivedArr = getArray('assistance_received')
@@ -415,7 +604,6 @@ export default function ApplicantDetailPage() {
   return (
     <AppLayout navItems={ADMIN_NAV}>
       <div className="fade-in-up">
-        {/* ── Page header ── */}
         <div className="applicant-header mb-3">
           <div className="applicant-header-left">
             <Link to="/admin/applicants" className="small text-muted">
@@ -426,12 +614,17 @@ export default function ApplicantDetailPage() {
             </h3>
             <div className="d-flex flex-wrap align-items-center gap-2">
               <span className={`badge status-badge ${statusColor(app.status)}`}>
-                {app.status}
+                {statusLabel(app.status)}
               </span>
-              {pendingCount > 0 && (
+              {pendingCount > 0 && !docLocked && (
                 <span className="badge bg-warning text-dark">
                   <i className="bi bi-hourglass-split me-1" />
                   {pendingCount} document{pendingCount > 1 ? 's' : ''} awaiting review
+                </span>
+              )}
+              {finalized && (
+                <span className="badge bg-secondary">
+                  <i className="bi bi-lock-fill me-1" /> Status finalized
                 </span>
               )}
             </div>
@@ -465,11 +658,69 @@ export default function ApplicantDetailPage() {
           </div>
         </div>
 
-        {error && <Alert variant="danger" message={error} />}
+        {inactive && (
+          <div
+            className={`alert ${
+              app.status === 'Deceased' ? 'alert-dark' : 'alert-secondary'
+            } d-flex align-items-start gap-2`}
+          >
+            <i
+              className={`bi ${
+                app.status === 'Deceased'
+                  ? 'bi-heartbreak'
+                  : 'bi-box-arrow-right'
+              } mt-1`}
+            />
+            <div>
+              <div className="fw-semibold">
+                This applicant is marked {statusLabel(app.status)}.
+              </div>
+              {app.remarks && (
+                <div className="small mt-1">
+                  <strong>Remarks:</strong> {app.remarks}
+                </div>
+              )}
+              <div className="small mt-1 text-muted">
+                Status changes, notifications, emails, and document review
+                are disabled. Reactivate this record from the Inactive page
+                to resume the workflow.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {finalized && (
+          <div
+            className={`alert ${
+              FINAL_ALERT_VARIANT[app.status] ?? 'alert-secondary'
+            } d-flex align-items-start gap-2`}
+          >
+            <i className="bi bi-lock-fill mt-1" />
+            <div>
+              <div className="fw-semibold">
+                This application is already {statusLabel(app.status)} — the
+                status decision is final.
+              </div>
+              {app.remarks && (
+                <div className="small mt-1">
+                  <strong>Remarks:</strong> {app.remarks}
+                </div>
+              )}
+              <div className="small mt-1 text-muted">
+                Status changes and quick actions are permanently locked.
+                <strong className="text-body">
+                  {' '}Document review and uploads are still available
+                </strong>{' '}
+                below if you need to correct or add attachments.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {error && !confirmTarget && <Alert variant="danger" message={error} />}
 
         <div className="row g-3">
           <div className="col-lg-8">
-            {/* ── Form card ── */}
             <div className="card border-0 shadow-sm mb-3">
               <div className="card-header">
                 <i className="bi bi-file-earmark-medical text-primary-pdao me-1" />
@@ -751,7 +1002,6 @@ export default function ApplicantDetailPage() {
                       </div>
                       <AssistanceChips raw={receivedArr} />
                     </div>
-
                     <div className="col-md-6">
                       <div className="d-flex align-items-center gap-2 mb-2">
                         <span className="badge bg-danger">
@@ -765,7 +1015,6 @@ export default function ApplicantDetailPage() {
               </div>
             </div>
 
-            {/* ── Documents ── */}
             <CollapsibleCard
               id="documents"
               icon="bi-folder"
@@ -773,12 +1022,12 @@ export default function ApplicantDetailPage() {
               summary={
                 documents.length === 0
                   ? 'None uploaded'
-                  : `${documents.length} file${documents.length > 1 ? 's' : ''}${pendingCount > 0 ? ` · ${pendingCount} pending` : ''}`
+                  : `${documents.length} file${documents.length > 1 ? 's' : ''}${pendingCount > 0 && !docLocked ? ` · ${pendingCount} pending` : ''}`
               }
               isOpen={openSections.has('documents')}
               onToggle={toggleSection}
               badge={
-                pendingCount > 0 ? (
+                pendingCount > 0 && !docLocked ? (
                   <span className="badge bg-warning text-dark">{pendingCount} pending</span>
                 ) : undefined
               }
@@ -825,7 +1074,12 @@ export default function ApplicantDetailPage() {
                             <button
                               className="btn btn-sm btn-primary"
                               onClick={() => setReviewing(d)}
-                              title="Review this document"
+                              disabled={docLocked}
+                              title={
+                                docLocked
+                                  ? 'This applicant is inactive — document review is disabled.'
+                                  : 'Review this document'
+                              }
                             >
                               <i className="bi bi-clipboard-check me-1" /> Review
                             </button>
@@ -844,7 +1098,6 @@ export default function ApplicantDetailPage() {
               </div>
             </CollapsibleCard>
 
-            {/* ── Status History ── */}
             <CollapsibleCard
               id="history"
               icon="bi-clock-history"
@@ -859,7 +1112,7 @@ export default function ApplicantDetailPage() {
                     <li className="timeline-item" key={log.id}>
                       <div className="d-flex justify-content-between align-items-start gap-2 flex-wrap">
                         <span className={`badge status-badge ${statusColor(log.new_status)}`}>
-                          {log.new_status}
+                          {statusLabel(log.new_status)}
                         </span>
                         <span className="text-muted small text-nowrap">
                           {fmtDateTime(log.created_at)}
@@ -876,83 +1129,152 @@ export default function ApplicantDetailPage() {
             </CollapsibleCard>
           </div>
 
-          {/* ── Right sidebar ── */}
           <div className="col-lg-4">
             <CollapsibleCard
               id="status-panel"
               icon="bi-pencil-square"
               title="Update Status"
-              summary={dash(app.status)}
+              summary={statusLabel(app.status)}
               isOpen={openSections.has('status-panel')}
               onToggle={toggleSection}
               className="sidebar-sticky"
             >
-              <form onSubmit={(e) => updateStatus(e)}>
-                <div className="mb-3">
-                  <label className="form-label">Status</label>
-                  <select
-                    className="form-select"
-                    value={newStatus}
-                    onChange={(e) => setNewStatus(e.target.value)}
-                  >
-                    {ALL_STATUSES.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="mb-3">
-                  <label className="form-label">Remarks</label>
-                  <textarea
-                    className="form-control"
-                    rows={3}
-                    value={remarks}
-                    onChange={(e) => setRemarks(e.target.value)}
-                    placeholder="Required for Rejected / Needs Revision. Saved to history and shown to the applicant."
-                  />
-                </div>
-                <div className="mb-3">
-                  <label className="form-label">
-                    Custom email message{' '}
-                    <span className="text-muted small">(optional)</span>
-                  </label>
-                  <textarea
-                    className="form-control"
-                    rows={4}
-                    value={customEmailMessage}
-                    onChange={(e) => setCustomEmailMessage(e.target.value)}
-                    placeholder="Leave blank to use the default message for the selected status."
-                  />
-                  <div className="form-text">
-                    If filled, this replaces the default paragraph in the email. Remarks are still shown separately.
+              {inactive ? (
+                <div className="alert alert-secondary mb-0">
+                  <div className="fw-semibold mb-1">
+                    <i className="bi bi-lock me-1" />
+                    Status changes are disabled
+                  </div>
+                  <div className="small">
+                    This record is marked{' '}
+                    <strong>{statusLabel(app.status)}</strong>. To resume the
+                    workflow, reactivate it from the Inactive page.
                   </div>
                 </div>
-                <button type="submit" className="btn btn-primary w-100" disabled={saving}>
-                  {saving ? (
-                    <>
-                      <span className="spinner-border spinner-border-sm me-1" /> Saving…
-                    </>
-                  ) : (
-                    <>
-                      <i className="bi bi-save me-1" /> Update status
-                    </>
+              ) : finalized ? (
+                <div
+                  className={`alert ${FINAL_ALERT_VARIANT[app.status] ?? 'alert-secondary'} mb-0`}
+                >
+                  <div className="fw-semibold mb-1">
+                    <i className="bi bi-lock-fill me-1" />
+                    Status decision is final
+                  </div>
+                  <div className="small">
+                    This application is already{' '}
+                    <strong>{statusLabel(app.status)}</strong>. No further
+                    status changes are allowed from this page.
+                  </div>
+                  {app.remarks && (
+                    <div className="small mt-2">
+                      <strong>Remarks:</strong> {app.remarks}
+                    </div>
                   )}
-                </button>
-              </form>
-              <hr />
-              <div className="d-grid gap-2">
-                <button className="btn btn-success" onClick={() => updateStatus(undefined, 'Approved')} disabled={saving}>
-                  <i className="bi bi-check-circle me-1" /> Approve
-                </button>
-                <button className="btn btn-danger" onClick={() => updateStatus(undefined, 'Rejected')} disabled={saving}>
-                  <i className="bi bi-x-circle me-1" /> Reject
-                </button>
-                <button className="btn btn-warning" onClick={() => updateStatus(undefined, 'Needs Revision')} disabled={saving}>
-                  <i className="bi bi-exclamation-triangle me-1" /> Request revision
-                </button>
-                <button className="btn btn-primary" onClick={() => updateStatus(undefined, 'Ready for Pickup')} disabled={saving}>
-                  <i className="bi bi-bag-check me-1" /> Mark ready for pickup
-                </button>
-              </div>
+                  <div className="small mt-2 text-muted">
+                    <i className="bi bi-folder me-1" />
+                    Need to correct a document? Use the{' '}
+                    <strong>Documents</strong> card — review stays available.
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      requestStatus(newStatus)
+                    }}
+                  >
+                    <div className="mb-3">
+                      <label className="form-label">Status</label>
+                      <select
+                        className="form-select"
+                        value={newStatus}
+                        onChange={(e) => setNewStatus(e.target.value)}
+                      >
+                        {ALL_STATUSES.filter((s) => !isInactiveStatus(s)).map((s) => (
+                          <option key={s} value={s}>{statusLabel(s)}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="mb-3">
+                      <label className="form-label">Remarks</label>
+                      <textarea
+                        className="form-control"
+                        rows={3}
+                        value={remarks}
+                        onChange={(e) => setRemarks(e.target.value)}
+                        placeholder="Required for Rejected / Needs Revision. Saved to history and shown to the applicant."
+                      />
+                    </div>
+                    <div className="mb-3">
+                      <label className="form-label">
+                        Custom email message{' '}
+                        <span className="text-muted small">(optional)</span>
+                      </label>
+                      <textarea
+                        className="form-control"
+                        rows={4}
+                        value={customEmailMessage}
+                        onChange={(e) => setCustomEmailMessage(e.target.value)}
+                        placeholder="Leave blank to use the default message for the selected status."
+                      />
+                      <div className="form-text">
+                        If filled, this replaces the default paragraph in the email. Remarks are still shown separately.
+                      </div>
+                    </div>
+                    <button type="submit" className="btn btn-primary w-100" disabled={saving}>
+                      {saving ? (
+                        <>
+                          <span className="spinner-border spinner-border-sm me-1" /> Saving…
+                        </>
+                      ) : (
+                        <>
+                          <i className="bi bi-save me-1" /> Update status
+                        </>
+                      )}
+                    </button>
+                  </form>
+                  <hr />
+                  <div className="d-grid gap-2">
+                    <button
+                      type="button"
+                      className="btn btn-success"
+                      onClick={() => requestStatus('Approved')}
+                      disabled={saving}
+                    >
+                      <i className="bi bi-check-circle me-1" /> Approve
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-danger"
+                      onClick={() => requestStatus('Rejected')}
+                      disabled={saving}
+                    >
+                      <i className="bi bi-x-circle me-1" /> Reject
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-warning"
+                      onClick={() => requestStatus('Needs Revision')}
+                      disabled={saving}
+                    >
+                      <i className="bi bi-exclamation-triangle me-1" /> Request revision
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => requestStatus('Ready for Pickup')}
+                      disabled={saving}
+                    >
+                      <i className="bi bi-bag-check me-1" /> Mark ready for pickup
+                    </button>
+                  </div>
+                  <div className="form-text small mt-2">
+                    <i className="bi bi-shield-lock me-1" />
+                    Final decisions require typing a confirmation word to
+                    prevent accidental presses.
+                  </div>
+                </>
+              )}
             </CollapsibleCard>
           </div>
         </div>
@@ -968,8 +1290,20 @@ export default function ApplicantDetailPage() {
         />
       )}
 
+      {confirmTarget && (
+        <ConfirmActionModal
+          target={confirmTarget}
+          requiredWord={CONFIRM_WORD[confirmTarget] ?? ''}
+          input={confirmInput}
+          onInput={setConfirmInput}
+          onCancel={closeConfirm}
+          onConfirm={confirmAction}
+          busy={saving}
+          error={error}
+        />
+      )}
+
       <style>{`
-        /* ── Page header ── */
         .applicant-header {
           display: flex;
           flex-wrap: wrap;
@@ -985,7 +1319,6 @@ export default function ApplicantDetailPage() {
           align-items: center;
         }
 
-        /* ── Accordion (form sections) ── */
         .accordion-section {
           border: 1px solid #e4e9f0;
           border-radius: 0.5rem;
@@ -1050,7 +1383,6 @@ export default function ApplicantDetailPage() {
           background: #fbfdff;
         }
 
-        /* ── Collapsible card (Documents / History / Sidebar) ── */
         .collapsible-card {
           border: 1px solid #e4e9f0;
           border-radius: 0.6rem;
@@ -1100,7 +1432,6 @@ export default function ApplicantDetailPage() {
           background: #fff;
         }
 
-        /* Sticky sidebar only on desktop where there's room */
         .sidebar-sticky { position: static; }
         @media (min-width: 992px) {
           .sidebar-sticky {
@@ -1109,7 +1440,6 @@ export default function ApplicantDetailPage() {
           }
         }
 
-        /* Filename truncation to prevent table overflow */
         .filename-cell {
           max-width: 240px;
         }
@@ -1122,7 +1452,6 @@ export default function ApplicantDetailPage() {
           vertical-align: bottom;
         }
 
-        /* Assistance chips */
         .assistance-chip {
           display: inline-flex;
           align-items: center;
@@ -1142,10 +1471,23 @@ export default function ApplicantDetailPage() {
         }
         .assistance-chip .chip-sep { color: #8fb3dc; }
 
-        /* Hide summaries on small screens */
         @media (max-width: 576px) {
           .accordion-summary,
           .collapsible-card-summary { display: none; }
+        }
+
+        /* Confirmation modal overlay */
+        .confirm-modal-backdrop {
+          position: fixed;
+          inset: 0;
+          background: rgba(15, 23, 42, 0.55);
+          z-index: 1050;
+          overflow-y: auto;
+        }
+        .confirm-modal-dialog {
+          max-width: 480px;
+          margin: 5vh auto;
+          padding: 0 1rem;
         }
       `}</style>
     </AppLayout>
@@ -1154,9 +1496,123 @@ export default function ApplicantDetailPage() {
 
 /* ---------- Helper Components ---------- */
 
-/**
- * Numbered accordion used inside the PWD form card.
- */
+function ConfirmActionModal({
+  target, requiredWord, input, onInput, onCancel, onConfirm, busy, error,
+}: {
+  target: string
+  requiredWord: string
+  input: string
+  onInput: (v: string) => void
+  onCancel: () => void
+  onConfirm: () => void
+  busy: boolean
+  error: string | null
+}) {
+  const normalized = input.trim().toUpperCase()
+  const matches = requiredWord !== '' && normalized === requiredWord
+  const showMismatch = input.length > 0 && !matches
+  const btnVariant = STATUS_BUTTON_VARIANT[target] ?? 'btn-primary'
+  const displayLabel = statusLabel(target)
+
+  return (
+    <div
+      className="confirm-modal-backdrop"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !busy) onCancel()
+      }}
+    >
+      <div className="confirm-modal-dialog">
+        <div className="modal-content shadow-lg border-0">
+          <div className="modal-header">
+            <h5 className="modal-title d-flex align-items-center gap-2">
+              <i className="bi bi-shield-exclamation text-warning" />
+              Confirm {displayLabel}
+            </h5>
+            <button
+              type="button"
+              className="btn-close"
+              onClick={onCancel}
+              disabled={busy}
+              aria-label="Close"
+            />
+          </div>
+          <div className="modal-body">
+            <p className="mb-2">
+              You&rsquo;re about to mark this application as{' '}
+              <strong>{displayLabel}</strong>.
+            </p>
+            <p className="mb-3 small text-muted">
+              This action is <strong>permanent</strong> and cannot be undone
+              from this page. To avoid accidental presses, type{' '}
+              <code className="fw-bold">{requiredWord}</code> in the box
+              below and click the confirm button.
+            </p>
+            <label className="form-label small fw-semibold">
+              Type <code>{requiredWord}</code> to confirm
+            </label>
+            <input
+              type="text"
+              className={`form-control ${showMismatch ? 'is-invalid' : ''}`}
+              value={input}
+              onChange={(e) => onInput(e.target.value)}
+              placeholder={requiredWord}
+              autoFocus
+              disabled={busy}
+              autoComplete="off"
+              spellCheck={false}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && matches && !busy) {
+                  e.preventDefault()
+                  onConfirm()
+                }
+              }}
+            />
+            {showMismatch && (
+              <div className="invalid-feedback d-block">
+                Doesn&rsquo;t match. Type <strong>{requiredWord}</strong> exactly
+                (case-insensitive).
+              </div>
+            )}
+            {error && (
+              <div className="mt-3">
+                <Alert variant="danger" message={error} />
+              </div>
+            )}
+          </div>
+          <div className="modal-footer">
+            <button
+              type="button"
+              className="btn btn-soft"
+              onClick={onCancel}
+              disabled={busy}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className={`btn ${btnVariant}`}
+              onClick={onConfirm}
+              disabled={!matches || busy}
+            >
+              {busy ? (
+                <>
+                  <span className="spinner-border spinner-border-sm me-1" />
+                  Saving…
+                </>
+              ) : (
+                <>
+                  <i className="bi bi-shield-check me-1" />
+                  Yes, {displayLabel.toLowerCase()}
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function AccordionSection({
   id, number, title, summary, isOpen, onToggle, children,
 }: {
@@ -1193,10 +1649,6 @@ function AccordionSection({
   )
 }
 
-/**
- * Reusable collapsible card used for Documents, Status History, and
- * the Update Status sidebar panel.
- */
 function CollapsibleCard({
   id, icon, title, summary, badge, isOpen, onToggle, children, className = '',
 }: {
@@ -1290,8 +1742,6 @@ function CheckboxGroup({ label, options, selected, inline = false }: CheckboxGro
     </div>
   )
 }
-
-/* ---------- Compact assistance display (chips, new format) ---------- */
 
 function AssistanceChips({ raw }: { raw: string[] }) {
   const parsed = parseAssistance(raw)
