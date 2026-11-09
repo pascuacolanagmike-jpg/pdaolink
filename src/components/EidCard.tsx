@@ -1,5 +1,9 @@
 import { type Application, appFullName, fmtDate } from '../lib/types'
 
+// Back EID background image — imported as a module so the bundler
+// resolves it correctly on localhost AND on GitHub Pages / any deploy.
+import backEidImage from '../pages/public/images/20260913849d1475-9ccb-4eae-811a-06546c6317c0.jpeg'
+
 interface EidCardProps {
   application: Application
   photoUrl: string | null
@@ -57,9 +61,11 @@ const styles = `
   /* Text Field Styling */
   .eid-text {
     position: absolute; z-index: 2; font-family: Arial, sans-serif;
-    font-size: 13px; font-weight: 700; color: #111;
+    /* Shrunk font to 11.5px to prevent it from spilling over the lines */
+    font-size: 11.5px; font-weight: 700; color: #111;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     line-height: 1; transform: translateY(-50%);
+    box-sizing: border-box;
     text-shadow: 0 0 4px #fff, 0 0 4px #fff, 0 0 7px rgba(255,255,255,0.9);
   }
   .eid-text-center { text-align: center; }
@@ -69,12 +75,13 @@ const styles = `
   .field-front-disability { top: 55%; left: 5%; width: 52%; }
   .field-front-pwd { top: 83%; left: 70%; width: 28%; }
 
-  /* Back Face Field Positions */
-  .field-back-address { top: 12.1%; left: 16.6%; width: 52%; }
+  /* Back Face Field Positions 
+     Adjusted widths to ensure left and right columns NEVER overlap. */
+  .field-back-address { top: 12.1%; left: 16.6%; width: 50%; } /* Reduced from 52% */
   .field-back-birth { top: 17.4%; left: 21.3%; width: 40%; }
   .field-back-issue { top: 23.0%; left: 20.0%; width: 40%; }
-  .field-back-gender { top: 9.7%; left: 76.9%; width: 20%; }
-  .field-back-blood { top: 15.2%; left: 76.9%; width: 20%; }
+  .field-back-gender { top: 9.7%; left: 77%; width: 18%; } /* Shifted right slightly */
+  .field-back-blood { top: 15.2%; left: 77%; width: 18%; } /* Shifted right slightly */
   .field-back-emergency-name { top: 47.4%; left: 16.6%; width: 50%; }
   .field-back-emergency-contact { top: 53.1%; left: 16.6%; width: 50%; }
 
@@ -137,10 +144,10 @@ const styles = `
       left: 50% !important;
       transform: translate(-50%, -50%) !important;
       display: flex !important;
-      flex-direction: row !important;     /* ← changed: left-to-right */
+      flex-direction: row !important;
       flex-wrap: nowrap !important;
-      gap: 10mm !important;               /* horizontal gap between the two cards */
-      align-items: center !important;     /* vertically center both cards */
+      gap: 10mm !important;
+      align-items: center !important;
       justify-content: center !important;
       background: #fff !important;
       z-index: 99999 !important;
@@ -157,7 +164,6 @@ const styles = `
       print-color-adjust: exact !important;
     }
 
-    /* Optional: shrink the wrapper so it doesn't add extra spacing */
     .eid-print-card-wrap {
       gap: 0 !important;
     }
@@ -215,7 +221,8 @@ export default function EidCard({
 
   const backInner = (
     <>
-      <img src="https://cdn.postimage.me/2026/09/13/849d1475-9ccb-4eae-811a-06546c6317c0.jpeg" alt="" className="eid-bg" />
+      {/* Bundled local image — works on localhost and GitHub Pages */}
+      <img src={backEidImage} alt="" className="eid-bg" />
 
       <div className="eid-text field-back-address">
         {address || '—'}
@@ -256,7 +263,7 @@ export default function EidCard({
           className="eid-print-layout"
           style={{
             display: 'flex',
-            flexDirection: 'row',           // ← changed: side-by-side preview
+            flexDirection: 'row',
             flexWrap: 'wrap',
             gap: '20px',
             padding: '10px',
