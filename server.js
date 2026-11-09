@@ -1,6 +1,6 @@
 import express from 'express'
 import multer from 'multer'
-import mindee from 'mindee'
+import * as mindee from 'mindee' // <-- THE FIX
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
@@ -16,6 +16,8 @@ app.post('/api/ocr', upload.single('document'), async (req, res) => {
 
   try {
     const client = new mindee.Client({ apiKey: process.env.MINDEE_API_KEY })
+    
+    // Use the correct BufferInput class
     const inputSource = new mindee.BufferInput({
       buffer: req.file.buffer,
       filename: req.file.originalname,
