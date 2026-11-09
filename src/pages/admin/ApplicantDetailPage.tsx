@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams, Link } from 'react-router-dom'
 import AppLayout from '../../components/AppLayout'
 import Alert from '../../components/Alert'
@@ -42,23 +43,10 @@ const DISABILITY_TYPES = [
 const CONGENITAL_CAUSES = ['ADHD', 'Cerebral Palsy', 'Down Syndrome', 'Others']
 const ACQUIRED_CAUSES = ['Chronic Illness', 'Cerebral Palsy', 'Injury', 'Others']
 
-// ─────────────────────────────────────────────────────────────
-// FINAL / DONE STATUSES
-// Once an application reaches one of these, the STATUS DECISION
-// surface (form + quick actions) is permanently locked — but
-// document review stays editable (see below).
-// ─────────────────────────────────────────────────────────────
 const FINAL_STATUSES = ['Approved', 'Rejected', 'Ready for Pickup'] as const
 const isFinalStatus = (status: string) =>
   (FINAL_STATUSES as readonly string[]).includes(status)
 
-// ─────────────────────────────────────────────────────────────
-// CONFIRMATION WORDS
-// Final / destructive actions require the admin to type the
-// matching word before the action can be applied. This guards
-// against accidental clicks. Edit or remove entries here to
-// change which actions need confirmation.
-// ─────────────────────────────────────────────────────────────
 const CONFIRM_WORD: Record<string, string> = {
   Approved: 'APPROVED',
   Rejected: 'REJECTED',
@@ -238,7 +226,6 @@ export default function ApplicantDetailPage() {
   const [confirmTarget, setConfirmTarget] = useState<string | null>(null)
   const [confirmInput, setConfirmInput] = useState('')
 
-  // ── Load applicant + documents + logs ──
   useEffect(() => {
     if (!id) {
       console.error('ApplicantDetailPage: no `id` param found in URL.')
@@ -309,12 +296,6 @@ export default function ApplicantDetailPage() {
   const expandAll = () => setOpenSections(new Set(ALL_SECTION_IDS))
   const collapseAll = () => setOpenSections(new Set())
 
-  // ─────────────────────────────────────────────────────────
-  // requestStatus — the single entry point for any status change.
-  // Runs the guards (inactive / finalized / remarks required),
-  // then either opens the confirmation modal (for final actions)
-  // or applies the change immediately (for safe statuses).
-  // ─────────────────────────────────────────────────────────
   const requestStatus = (target: string) => {
     if (!app || !profile) return
 
@@ -344,7 +325,6 @@ export default function ApplicantDetailPage() {
       return
     }
 
-    // Final / destructive actions require typing a confirm word.
     if (CONFIRM_WORD[target]) {
       setError(null)
       setConfirmInput('')
@@ -352,7 +332,6 @@ export default function ApplicantDetailPage() {
       return
     }
 
-    // Safe statuses (Under Review, Pending, etc.) apply immediately.
     void updateStatus(target)
   }
 
@@ -373,11 +352,6 @@ export default function ApplicantDetailPage() {
     }
   }
 
-  // ─────────────────────────────────────────────────────────
-  // updateStatus — actually applies the change. Runs the guards
-  // again (defense in depth) and returns true on success so the
-  // confirmation modal knows whether to close.
-  // ─────────────────────────────────────────────────────────
   const updateStatus = async (target: string): Promise<boolean> => {
     if (!app || !profile) return false
 
@@ -489,6 +463,7 @@ export default function ApplicantDetailPage() {
     }
 
     setApp({ ...app, status: target as any, remarks })
+    setNewStatus(target)
     setCustomEmailMessage('')
     setSaving(false)
     const { data: newLogs } = await supabase
@@ -511,15 +486,6 @@ export default function ApplicantDetailPage() {
     window.open(data.signedUrl, '_blank')
   }
 
-  // ─────────────────────────────────────────────────────────
-  // Document review handler — updates the row and (optionally)
-  // fires a Textbee SMS notification to the applicant when the
-  // status changes to approved or rejected.
-  //
-  // Document review stays editable even when the APPLICATION is
-  // finalized (Approved/Rejected/Ready for Pickup). Only inactive
-  // records (Deceased/Transferred) block review.
-  // ─────────────────────────────────────────────────────────
   const handleDocReviewed = async (updated: DocumentRow) => {
     if (app && isInactiveStatus(app.status)) {
       setError(
@@ -1440,9 +1406,7 @@ export default function ApplicantDetailPage() {
           }
         }
 
-        .filename-cell {
-          max-width: 240px;
-        }
+        .filename-cell { max-width: 240px; }
         .filename-text {
           display: inline-block;
           max-width: 200px;
@@ -1465,10 +1429,7 @@ export default function ApplicantDetailPage() {
           margin-right: 0.3rem;
           margin-bottom: 0.3rem;
         }
-        .assistance-chip .chip-cat {
-          font-weight: 700;
-          color: #1a2a44;
-        }
+        .assistance-chip .chip-cat { font-weight: 700; color: #1a2a44; }
         .assistance-chip .chip-sep { color: #8fb3dc; }
 
         @media (max-width: 576px) {
@@ -1476,18 +1437,34 @@ export default function ApplicantDetailPage() {
           .collapsible-card-summary { display: none; }
         }
 
-        /* Confirmation modal overlay */
+        /* ── Confirmation modal (rendered via portal to <body>) ── */
         .confirm-modal-backdrop {
           position: fixed;
           inset: 0;
           background: rgba(15, 23, 42, 0.55);
-          z-index: 1050;
+          z-index: 1080;
           overflow-y: auto;
+          display: flex;
+          align-items: flex-start;
+          justify-content: center;
+          padding: 5vh 1rem;
+          animation: confirmFadeIn 0.15s ease-out;
         }
         .confirm-modal-dialog {
+          width: 100%;
           max-width: 480px;
-          margin: 5vh auto;
-          padding: 0 1rem;
+        }
+        .confirm-modal-dialog .modal-content {
+          border-radius: 0.75rem;
+          animation: confirmPopIn 0.18s ease-out;
+        }
+        @keyframes confirmFadeIn {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+        @keyframes confirmPopIn {
+          from { opacity: 0; transform: translateY(8px) scale(0.98); }
+          to   { opacity: 1; transform: translateY(0)   scale(1); }
         }
       `}</style>
     </AppLayout>
@@ -1514,9 +1491,28 @@ function ConfirmActionModal({
   const btnVariant = STATUS_BUTTON_VARIANT[target] ?? 'btn-primary'
   const displayLabel = statusLabel(target)
 
-  return (
+  // ESC to close + body scroll lock while open.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !busy) onCancel()
+    }
+    window.addEventListener('keydown', onKey)
+
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prevOverflow
+    }
+  }, [busy, onCancel])
+
+  return createPortal(
     <div
       className="confirm-modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-modal-title"
       onClick={(e) => {
         if (e.target === e.currentTarget && !busy) onCancel()
       }}
@@ -1524,7 +1520,10 @@ function ConfirmActionModal({
       <div className="confirm-modal-dialog">
         <div className="modal-content shadow-lg border-0">
           <div className="modal-header">
-            <h5 className="modal-title d-flex align-items-center gap-2">
+            <h5
+              className="modal-title d-flex align-items-center gap-2"
+              id="confirm-modal-title"
+            >
               <i className="bi bi-shield-exclamation text-warning" />
               Confirm {displayLabel}
             </h5>
@@ -1609,7 +1608,8 @@ function ConfirmActionModal({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
