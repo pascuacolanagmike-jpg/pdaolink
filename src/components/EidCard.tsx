@@ -215,7 +215,7 @@ export default function EidCard({
 
   const backInner = (
     <>
-      <img src="https://ibb.co/ksw1htnC" alt="" className="eid-bg" />
+      <img src="https://cdn.postimage.me/2026/09/13/849d1475-9ccb-4eae-811a-06546c6317c0.jpe" alt="" className="eid-bg" />
 
       <div className="eid-text field-back-address">
         {address || '—'}
