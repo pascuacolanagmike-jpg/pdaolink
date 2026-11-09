@@ -1,5 +1,9 @@
 import { type Application, appFullName, fmtDate } from '../lib/types'
 
+// Back EID background image — imported as a module so the bundler
+// resolves it correctly on localhost AND on GitHub Pages / any deploy.
+import backEidImage from '../pages/public/images/20260913849d1475-9ccb-4eae-811a-06546c6317c0.jpeg'
+
 interface EidCardProps {
   application: Application
   photoUrl: string | null
@@ -215,7 +219,8 @@ export default function EidCard({
 
   const backInner = (
     <>
-      <img src="https://cdn.postimage.me/2026/09/13/849d1475-9ccb-4eae-811a-06546c6317c0.jpeg" alt="" className="eid-bg" />
+      {/* Bundled local image — works on localhost and GitHub Pages */}
+      <img src={backEidImage} alt="" className="eid-bg" />
 
       <div className="eid-text field-back-address">
         {address || '—'}
