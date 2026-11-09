@@ -5,8 +5,8 @@ import { ADMIN_NAV } from '../../lib/nav'
 import { supabase } from '../../lib/supabase'
 import {
   statusColor,
-  statusLabel,           // ← NEW
-  isInactiveStatus,      // ← NEW
+  statusLabel,
+  isInactiveStatus,
   fmtDate,
   fmtDateTime,
   appFullName,
@@ -19,8 +19,8 @@ const STATUS_COLUMNS = [
   'Rejected',
   'Approved',
   'Ready for Pickup',
-  'Deceased',            // ← NEW
-  'Transferred',         // ← NEW
+  'Deceased',
+  'Transferred',
 ] as const
 
 type StatusColumn = (typeof STATUS_COLUMNS)[number]
@@ -178,8 +178,8 @@ export default function ArchivedPage() {
       Rejected: 0,
       Approved: 0,
       'Ready for Pickup': 0,
-      Deceased: 0,          // ← NEW
-      Transferred: 0,       // ← NEW
+      Deceased: 0,
+      Transferred: 0,
     }
     for (const a of visibleAll) {
       if (base[a.status as StatusColumn] !== undefined) {
@@ -517,11 +517,18 @@ export default function ArchivedPage() {
     }
   })()
 
+  // ── Case-sensitive: only the exact string "DELETE" enables the button ──
   const canConfirm =
     !!confirm &&
     !busy &&
-    (!confirmCopy?.requireTyping ||
-      confirmText.trim().toUpperCase() === 'DELETE')
+    (!confirmCopy?.requireTyping || confirmText.trim() === 'DELETE')
+
+  // Shows only when the user typed the right letters in the wrong case
+  const showCaseHint =
+    !!confirmCopy?.requireTyping &&
+    confirmText.length > 0 &&
+    confirmText.trim() !== 'DELETE' &&
+    confirmText.trim().toUpperCase() === 'DELETE'
 
   return (
     <AppLayout navItems={ADMIN_NAV}>
@@ -1096,13 +1103,23 @@ export default function ArchivedPage() {
                   </label>
                   <input
                     id="confirmTextInput"
-                    className="form-control"
+                    className={`form-control ${
+                      confirmText.length > 0 && confirmText.trim() !== 'DELETE'
+                        ? 'is-invalid'
+                        : ''
+                    }`}
                     autoComplete="off"
                     value={confirmText}
                     onChange={(e) => setConfirmText(e.target.value)}
                     disabled={busy}
                     placeholder="DELETE"
                   />
+                  {showCaseHint && (
+                    <div className="text-danger small mt-1">
+                      <i className="bi bi-exclamation-circle me-1" />
+                      Must be typed in all caps — <strong>DELETE</strong>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
