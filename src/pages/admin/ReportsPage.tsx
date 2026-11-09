@@ -721,35 +721,6 @@ export default function ReportsPage() {
     }
   }
 
-  /* ── CSV (fallback) ── */
-  const exportDisabilityStatsCSV = () => {
-    const headers = ['Type of Disability', 'Total No. of Individuals', 'Age Range', 'Male', 'Female']
-    const csvRows: string[][] = []
-    buildExportRows().forEach((d) => {
-      d.brackets.forEach((b, index) => {
-        csvRows.push([
-          index === 0 ? d.disability : '',
-          index === 0 ? String(d.total) : '',
-          b.label,
-          String(b.male),
-          String(b.female),
-        ])
-      })
-      csvRows.push(['TOTAL', String(d.total), '', String(d.male), String(d.female)])
-    })
-    csvRows.push(['GRAND TOTAL', String(disabilityStats.grandTotal), '', String(disabilityStats.grandMale), String(disabilityStats.grandFemale)])
-
-    const csv = [headers.join(','), ...csvRows.map((r) => r.map((c) => `"${c}"`).join(','))].join('\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement('a')
-    const url = URL.createObjectURL(blob)
-    link.href = url
-    link.download = `pdaolink-disability-statistics${exportSuffix()}.csv`
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-  }
-
   const agesInFiltered = filteredApplicants.map((a) => getAge(a)).filter((n): n is number => n !== null)
   const avgAge = agesInFiltered.length ? Math.round(agesInFiltered.reduce((s, n) => s + n, 0) / agesInFiltered.length) : null
 
@@ -1079,14 +1050,6 @@ export default function ReportsPage() {
                 disabled={disabilityStats.grandTotal === 0}
               >
                 <i className="bi bi-file-earmark-spreadsheet me-1" /> Excel
-              </button>
-              <button
-                className="btn btn-soft"
-                onClick={exportDisabilityStatsCSV}
-                title="Export as CSV"
-                disabled={disabilityStats.grandTotal === 0}
-              >
-                <i className="bi bi-filetype-csv me-1" /> CSV
               </button>
             </div>
           }

@@ -11,29 +11,18 @@ const SLOTS: { key: Slot; label: string; hint: string }[] = [
   { key: 'medical_abstract', label: 'Medical abstract',  hint: 'Signed by your physician — PNG only' },
 ]
 
-// ─── allowed file types (PNG only, everywhere) ───
 const ALLOWED_MIME = ['image/png'] as const
 type AllowedMime = (typeof ALLOWED_MIME)[number]
 
-// ─── per-slot allowlist (all PNG only) ───
 const SLOT_MIME: Record<Slot, readonly AllowedMime[]> = {
   id:               ['image/png'],
   birth_cert:       ['image/png'],
   medical_abstract: ['image/png'],
 }
 
-const EXT_BY_MIME: Record<AllowedMime, string> = {
-  'image/png': 'png',
-}
-
-// Some browsers/OSes leave file.type empty, so fall back to the extension
-const EXT_TO_MIME: Record<string, AllowedMime> = {
-  png: 'image/png',
-}
-
-const MIME_TO_EXT: Record<AllowedMime, string[]> = {
-  'image/png': ['.png'],
-}
+const EXT_BY_MIME: Record<AllowedMime, string> = { 'image/png': 'png' }
+const EXT_TO_MIME: Record<string, AllowedMime> = { png: 'image/png' }
+const MIME_TO_EXT: Record<AllowedMime, string[]> = { 'image/png': ['.png'] }
 
 function acceptFor(slot: Slot): string {
   return SLOT_MIME[slot].flatMap(m => [m, ...MIME_TO_EXT[m]]).join(',')
@@ -46,11 +35,111 @@ function resolveMime(file: File, slot: Slot): AllowedMime | null {
   const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
   const mime = byType ?? EXT_TO_MIME[ext] ?? null
   if (!mime) return null
-  // slot gate: reject anything not allowed for this specific slot
   return SLOT_MIME[slot].includes(mime) ? mime : null
 }
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024 // 10 MB
+
+// ─── Types & Parser for Mindee Text ───
+interface ExtractedIdData {
+  lastName: string
+  firstName: string
+  middleName: string
+  suffix: string
+  sex: string
+  birthDate: string
+  civilStatus: string
+}
+
+const EMPTY_RESULT: ExtractedIdData = {
+  lastName: '', firstName: '', middleName: '', suffix: '', sex: '', birthDate: '', civilStatus: '',
+}
+
+// ─── PARSER: Handles PhilSys & UMID layouts ───
+function parseTextToFields(rawText: string): ExtractedIdData {
+  const text = rawText.toUpperCase().replace(/\n/g, ' ').replace(/\s+/g, ' ')
+  const STOP_LABELS = 'SURNAME|LAST NAME|APELYIDO|GIVEN NAME|GIVEN NAMES|FIRST NAME|MGA PANGALAN|MIDDLE NAME|GITNANG APELYIDO|DATE OF BIRTH|PETSA NG KAPANGANAKAN|SEX|KASARIAN|ADDRESS|TIRAHAN|NATIONALITY|CIVIL STATUS|KALAGAYANG SIBIL|STATUS|COLOR|HAIR|EYE|BLOOD|WEIGHT|HEIGHT|$'
+
+  const extractField = (labels: string[]): string => {
+    const labelRegex = labels.join('|')
+    const regex = new RegExp(`(?:${labelRegex})[\\s:\\/]*([\\s\\S]*?)(?=${STOP_LABELS})`, 'i')
+    const match = text.match(regex)
+    if (match && match[1]) {
+      return match[1].replace(/[^A-ZÑ\s]/gi, '').replace(/\s+/g, ' ').trim()
+    }
+    return ''
+  }
+
+  const extractDate = (): string => {
+    const dobRegex = /(?:DATE OF BIRTH|PETSA NG KAPANGANAKAN|BIRTHDATE|DOB)[\s:\/]*([A-Z0-9,\s\/\-]+)/i
+    const match = text.match(dobRegex)
+    const dateStr = match ? match[1] : text
+
+    const numericMatch = dateStr.match(/(19|20)\d{2}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}/)
+    if (numericMatch) {
+      const parts = numericMatch[0].split(/[\/\-\.]/)
+      return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`
+    }
+
+    const months: Record<string, string> = {
+      JANUARY: '01', FEBRUARY: '02', MARCH: '03', APRIL: '04', MAY: '05', JUNE: '06',
+      JULY: '07', AUGUST: '08', SEPTEMBER: '09', OCTOBER: '10', NOVEMBER: '11', DECEMBER: '12',
+      JAN: '01', FEB: '02', MAR: '03', APR: '04', JUN: '06', JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12'
+    }
+    const monthRegex = /(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+(\d{1,2}),?\s+(\d{4})/i
+    const m = dateStr.match(monthRegex)
+    if (m) {
+      return `${m[3]}-${months[m[1].toUpperCase()]}-${m[2].padStart(2, '0')}`
+    }
+
+    return ''
+  }
+
+  const extractSex = (): string => {
+    const match = text.match(/(?:SEX|KASARIAN)[\s:\/]*([MF])/i)
+    return match ? (match[1].toUpperCase() === 'M' ? 'Male' : 'Female') : ''
+  }
+
+  const extractStatus = (): string => {
+    const match = text.match(/(?:CIVIL STATUS|KALAGAYANG SIBIL|STATUS)[\s:\/]*(SINGLE|MARRIED|WIDOWED|SEPARATED|SOLO PARENT|ANNULLED)/i)
+    return match ? match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase() : ''
+  }
+
+  const result: ExtractedIdData = {
+    lastName: extractField(['SURNAME', 'LAST NAME', 'APELYIDO']),
+    firstName: extractField(['GIVEN NAME', 'GIVEN NAMES', 'FIRST NAME', 'MGA PANGALAN']),
+    middleName: extractField(['MIDDLE NAME', 'GITNANG APELYIDO']),
+    sex: extractSex(),
+    birthDate: extractDate(),
+    civilStatus: extractStatus(),
+    suffix: '',
+  }
+
+  const allNames = `${result.lastName} ${result.firstName} ${result.middleName}`
+  const suffixMatch = allNames.match(/\b(JR|SR|II|III|IV|V)\b/i)
+  if (suffixMatch) result.suffix = suffixMatch[0].toUpperCase()
+
+  return result
+}
+
+// ─── API call to Vite's built-in Mindee endpoint ───
+async function runMindeeBackend(file: File): Promise<ExtractedIdData> {
+  const form = new FormData()
+  form.append('document', file)
+
+  const res = await fetch('/api/ocr', {
+    method: 'POST',
+    body: form,
+  })
+
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Backend error: ${body}`)
+  }
+
+  const json = await res.json()
+  return parseTextToFields(json.text)
+}
 
 export default function VerifyPage() {
   const { user, profile, refreshProfile } = useAuth()
@@ -60,11 +149,12 @@ export default function VerifyPage() {
   const [consent, setConsent] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // phone state (prefilled if user already has one from a previous attempt)
   const [phone, setPhone] = useState(profile?.phone ?? '')
   const [submitting, setSubmitting] = useState(false)
 
-  // PH mobile: 0917 123 4567 | +63 917 123 4567 | 09171234567
+  // ─── OCR Status State ───
+  const [ocrStatus, setOcrStatus] = useState<'idle' | 'scanning' | 'success' | 'error'>('idle')
+
   const phoneValid = useMemo(() => {
     const cleaned = phone.replace(/[\s\-()]/g, '')
     return /^(?:\+63|0)9\d{9}$/.test(cleaned)
@@ -81,18 +171,46 @@ export default function VerifyPage() {
     if (/^[+]?[\d\s\-()]*$/.test(value)) setPhone(value)
   }
 
+  async function runOcr(file: File) {
+    setOcrStatus('scanning')
+    
+    try {
+      const parsed = await runMindeeBackend(file)
+
+      // Save to Supabase profiles
+      if (user) {
+        await supabase
+          .from('profiles')
+          .update({
+            first_name: parsed.firstName || null,
+            last_name: parsed.lastName || null,
+            suffix: parsed.suffix || null,
+            birth_date: parsed.birthDate || null,
+            gender: parsed.sex || null,
+            civil_status: parsed.civilStatus || null,
+          })
+          .eq('id', user.id)
+        
+        await refreshProfile?.()
+      }
+      
+      setOcrStatus('success')
+    } catch (e: any) {
+      console.error("OCR Failed:", e)
+      setOcrStatus('error')
+    }
+  }
+
   async function upload(slot: Slot, file: File) {
     if (!user) return
     setError(null)
 
-    // enforce PNG-only for every slot
     const mime = resolveMime(file, slot)
     if (!mime) {
       setError('Only PNG files are allowed.')
       return
     }
 
-    // enforce max size
     if (file.size > MAX_FILE_BYTES) {
       setError('File must be 10 MB or smaller.')
       return
@@ -116,13 +234,18 @@ export default function VerifyPage() {
         )
       if (dbErr) throw dbErr
 
-      // if the previous upload used a different extension, clean up the orphan
       const previous = uploaded[slot]
       if (previous && previous !== path) {
         await supabase.storage.from('verification-docs').remove([previous])
       }
 
       setUploaded(u => ({ ...u, [slot]: path }))
+
+      // ─── Fire Mindee OCR on the ID slot ───
+      if (slot === 'id') {
+        void runOcr(file)
+      }
+
     } catch (e: any) {
       setError(e.message ?? 'Upload failed.')
     } finally {
@@ -133,14 +256,11 @@ export default function VerifyPage() {
   async function submit() {
     if (!consent) return setError('Please give consent to process your documents.')
     if (Object.keys(uploaded).length < 3) return setError('Please upload all three documents.')
-    // phone required before submission
     if (!phoneValid) return setError('Please enter a valid PH mobile number (e.g., 0917 123 4567).')
 
     setSubmitting(true)
     setError(null)
 
-    // save phone to profiles BEFORE the RPC, so the admin reviewer sees it.
-    // We save first because the SMS on approval depends on this number being present.
     if (user) {
       const { error: phoneErr } = await supabase
         .from('profiles')
@@ -204,7 +324,6 @@ export default function VerifyPage() {
                     onChange={e => {
                       const f = e.target.files?.[0]
                       if (f) upload(s.key, f)
-                      // reset so the same file can be re-picked after an error
                       e.target.value = ''
                     }}
                   />
@@ -215,7 +334,28 @@ export default function VerifyPage() {
         </div>
       ))}
 
-      {/* phone input — this is where the SMS on approval will go */}
+      {/* ─── OCR STATUS UI ─── */}
+      {ocrStatus === 'scanning' && (
+        <div className="alert alert-info d-flex align-items-center gap-2 shadow-sm border-0">
+          <span className="spinner-border spinner-border-sm text-info" />
+          <span><strong>Please wait.</strong> We are scanning your ID and auto-filling your details...</span>
+        </div>
+      )}
+
+      {ocrStatus === 'success' && (
+        <div className="alert alert-success d-flex align-items-center gap-2 shadow-sm border-0">
+          <i className="bi bi-check-circle-fill fs-5 text-success" />
+          <span><strong>Thank you for waiting!</strong> Your details have been saved. Please upload the other supporting documents.</span>
+        </div>
+      )}
+
+      {ocrStatus === 'error' && (
+        <div className="alert alert-warning d-flex align-items-center gap-2 shadow-sm border-0">
+          <i className="bi bi-exclamation-triangle-fill fs-5 text-warning" />
+          <span>We couldn't read the ID automatically. Don't worry — you can manually type your details in the next step.</span>
+        </div>
+      )}
+
       <div className="card mb-3 shadow-sm border-0">
         <div className="card-body">
           <label className="form-label fw-semibold mb-1">
@@ -270,7 +410,7 @@ export default function VerifyPage() {
       <button
         className="btn btn-primary w-100 py-2"
         onClick={submit}
-        disabled={!!busy || !allUploaded || !consent || !phoneValid || submitting}
+        disabled={!!busy || !allUploaded || !consent || !phoneValid || submitting || ocrStatus === 'scanning'}
       >
         {submitting ? (
           <>

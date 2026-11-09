@@ -161,7 +161,7 @@ export interface Profile {
   fullname: string
   email: string
   role: Role
-  phone: string | null                        // ← ADDED
+  phone: string | null
   contact_number: string | null
   address: string | null
   birth_date: string | null
@@ -169,11 +169,16 @@ export interface Profile {
   civil_status: string | null
   created_at: string
 
+  // ─── ADD THESE THREE ───
+  first_name: string | null
+  last_name: string | null
+  suffix: string | null
+
   // Identity verification (added for applicant review flow)
   verification_status: 'unverified' | 'pending' | 'approved' | 'rejected' | 'resubmit'
-  verification_notes: string | null           // ← RENAMED (was verification_note)
+  verification_notes: string | null
   verification_submitted_at: string | null
-  verification_reviewed_at: string | null     // ← ADDED
+  verification_reviewed_at: string | null
 }
 
 export interface Application {

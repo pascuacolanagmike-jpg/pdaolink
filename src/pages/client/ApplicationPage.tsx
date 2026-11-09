@@ -88,20 +88,12 @@ const ASSISTANCE_TREE: AssistanceNode[] = [
   },
 ]
 
-// ─────────────────────────────────────────────────────────
-// Assistance source encoding
-//
-// Each entry in `assistance_received` / `assistance_needed` is a
-// text[] element encoded as "govt:<leafKey>" or "ngo:<leafKey>".
-// At most one entry per (source, top-level category) pair is stored.
-// ─────────────────────────────────────────────────────────
 type AssistanceSource = 'govt' | 'ngo'
 
 const SOURCES: AssistanceSource[] = ['govt', 'ngo']
 const SOURCE_LABEL: Record<AssistanceSource, string> = { govt: "Gov't", ngo: 'NGO' }
 const SOURCE_PREFIX: Record<AssistanceSource, string> = { govt: 'govt:', ngo: 'ngo:' }
 
-/** All leaf keys selected for a given source (prefix stripped). */
 function getAssistanceSelection(arr: string[] | undefined, source: AssistanceSource): string[] {
   const prefix = SOURCE_PREFIX[source]
   return (arr ?? [])
@@ -109,7 +101,6 @@ function getAssistanceSelection(arr: string[] | undefined, source: AssistanceSou
     .map((v) => v.slice(prefix.length))
 }
 
-/** Top-level ancestor of a leaf key — used as the "slot" identifier. */
 function findTopLevelAncestor(
   targetKey: string,
   nodes: AssistanceNode[] = ASSISTANCE_TREE,
@@ -126,11 +117,6 @@ function findTopLevelAncestor(
   return null
 }
 
-/**
- * Toggle a leaf for a source. Only one leaf per top-level category can be
- * selected per source; picking a different leaf in the same category replaces
- * the previous one. Clicking the already-selected leaf clears it.
- */
 function setAssistanceSelection(
   arr: string[] | undefined,
   source: AssistanceSource,
@@ -141,7 +127,6 @@ function setAssistanceSelection(
   const alreadySelected = current.includes(prefix + key)
   const topKey = findTopLevelAncestor(key)
 
-  // Drop any existing entry for this source whose top-level category matches.
   const filtered = current.filter((v) => {
     if (typeof v !== 'string' || !v.startsWith(prefix)) return true
     const existingKey = v.slice(prefix.length)
@@ -159,13 +144,11 @@ function isAssistanceEntry(value: unknown): value is string {
   )
 }
 
-/** Keeps only well-formed agency-prefixed entries. */
 function normalizeAssist(arr: unknown): string[] {
   if (!Array.isArray(arr)) return []
   return arr.filter(isAssistanceEntry)
 }
 
-/** Resolve a leaf key to its human-readable label. */
 function findAssistanceLabel(key: string, nodes: AssistanceNode[] = ASSISTANCE_TREE): string {
   for (const node of nodes) {
     if (node.key === key) return node.label
@@ -177,9 +160,6 @@ function findAssistanceLabel(key: string, nodes: AssistanceNode[] = ASSISTANCE_T
   return ''
 }
 
-// ─────────────────────────────────────────────────────────
-// Locked LGU scope — Cauayan City, Isabela, Region 2
-// ─────────────────────────────────────────────────────────
 const LOCKED_MUNICIPALITY = 'Cauayan City'
 const LOCKED_PROVINCE = 'Isabela'
 const LOCKED_REGION = 'Region 2'
@@ -187,7 +167,6 @@ const LOCKED_INPUT_STYLE = { backgroundColor: '#eef2f7', cursor: 'not-allowed' }
 
 const SUFFIX_OPTIONS = ['', 'Jr.', 'Sr.', 'II', 'III', 'IV', 'V'] as const
 
-// helper: today's date in YYYY-MM-DD
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
 const EMPTY: ApplicationInput = {
@@ -231,7 +210,6 @@ function toApplicationInput(app: Application): ApplicationInput {
   result.region = LOCKED_REGION
   result.assistance_received_source = ''
   result.assistance_needed_source = ''
-  // Normalize physician license no. to digits only (legacy data safety)
   result.physician_license_no = String(result.physician_license_no ?? '').replace(/\D/g, '')
   return result
 }
@@ -246,9 +224,6 @@ type ArrayField =
 
 type AssistanceField = 'assistance_received' | 'assistance_needed'
 
-// ─────────────────────────────────────────────────────────
-// Nominatim reverse geocode: lat/lng → barangay
-// ─────────────────────────────────────────────────────────
 interface NominatimAddress {
   barangay?: string
   quarter?: string
@@ -297,13 +272,28 @@ async function reverseGeocodeBarangay(lat: number, lng: number): Promise<Reverse
 export default function ApplicationPage() {
   const { profile } = useAuth()
   const navigate = useNavigate()
+  
+  // ─── PRODUCTION AUTO-FILL LOGIC ───
   const [form, setForm] = useState<ApplicationInput>(() => ({
     ...EMPTY,
     date_applied: todayISO(),
     email: profile?.email ?? '',
-    first_name: profile?.fullname?.split(' ')[0] ?? '',
-    last_name: profile?.fullname?.split(' ').slice(1).join(' ') ?? '',
+    
+    // 1. Try to use OCR data from Profile
+    // 2. Fallback to old fullname split
+    // 3. Fallback to empty string
+    first_name: profile?.first_name || profile?.fullname?.split(' ')[0] || '',
+    last_name: profile?.last_name || profile?.fullname?.split(' ').slice(1).join(' ') || '',
+    suffix: profile?.suffix || '',
+    birth_date: profile?.birth_date || '',
+    gender: profile?.gender || '',
+    civil_status: profile?.civil_status || '',
+    
+    // Auto-fill phone number from Verify Page
+    mobile_no: profile?.phone || '',
   }))
+  // ──────────────────────────────────
+
   const [existing, setExisting] = useState<Application | null>(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -311,7 +301,6 @@ export default function ApplicationPage() {
   const [success, setSuccess] = useState<string | null>(null)
   const [showOtherDisability, setShowOtherDisability] = useState(false)
 
-  // GPS state
   const [locating, setLocating] = useState(false)
   const [geoNote, setGeoNote] = useState<string | null>(null)
 
@@ -341,7 +330,6 @@ export default function ApplicationPage() {
     setForm((f) => ({ ...f, [field]: value }))
   }
 
-  // Same as `set`, but strips any non-digit characters (0-9 only)
   const setDigits = (field: keyof ApplicationInput, value: string) => {
     setForm((f) => ({ ...f, [field]: value.replace(/\D/g, '') }))
   }
@@ -355,7 +343,6 @@ export default function ApplicationPage() {
     })
   }
 
-  /** Slot-aware single-select per source. */
   const selectAssistance = (
     field: AssistanceField,
     source: AssistanceSource,
@@ -374,7 +361,6 @@ export default function ApplicationPage() {
     }))
   }
 
-  // ── GPS: get position → reverse geocode → fill barangay only ──
   const handleUseLocation = () => {
     setGeoNote(null)
     if (!('geolocation' in navigator)) {
@@ -464,7 +450,6 @@ export default function ApplicationPage() {
       assistance_needed_source: '',
       assistance_received: normalizeAssist(form.assistance_received),
       assistance_needed: normalizeAssist(form.assistance_needed),
-      // Ensure physician license no. is digits only at save-time
       physician_license_no: (form.physician_license_no ?? '').replace(/\D/g, ''),
     }
 
@@ -918,7 +903,6 @@ export default function ApplicationPage() {
               </div>
             </FormCard>
 
-            {/* ───────── Section 22: Assistance Received / Needed / Rehabilitation ───────── */}
             <FormCard
               icon="bi-clipboard2-heart"
               title="Assistance Received / Needed / Rehabilitation"
@@ -1178,8 +1162,6 @@ function CheckboxRow({
   )
 }
 
-// ─────────── Assistance column (one per "Received" / "Needed") ───────────
-
 function AssistanceColumn({
   title,
   icon,
@@ -1200,7 +1182,7 @@ function AssistanceColumn({
   const selectedKeys = getAssistanceSelection(values, source)
   const countFor = (s: AssistanceSource) => getAssistanceSelection(values, s).length
 
-  const removeOne = (key: string) => onSelect(source, key) // re-selecting toggles it off
+  const removeOne = (key: string) => onSelect(source, key)
 
   const labelFor = (key: string) => findAssistanceLabel(key)
   const slotLabelFor = (key: string) => {
@@ -1283,8 +1265,6 @@ function AssistanceColumn({
   )
 }
 
-// ─────────── Assistance tree (single-select per top-level category) ───────────
-
 function AssistanceTree({
   nodes,
   values,
@@ -1317,9 +1297,7 @@ function AssistanceTree({
         const isOpen = !!open[node.key]
         const isChecked = values.includes(node.key)
         const childSelected = hasChildren && hasAnySelected(node)
-        // The top-level key this node belongs to (its own key if depth 0).
         const nodeTopKey = topKey ?? node.key
-        // Radio group name is unique per (source, variant, top-level category).
         const groupName = `${name}__${nodeTopKey}`
 
         return (
