@@ -1437,11 +1437,11 @@ export default function ApplicantDetailPage() {
           .collapsible-card-summary { display: none; }
         }
 
-        /* ── Confirmation modal (rendered via portal to <body>) ── */
+        /* ── Confirmation modal (solid opaque card, portaled to <body>) ── */
         .confirm-modal-backdrop {
           position: fixed;
           inset: 0;
-          background: rgba(15, 23, 42, 0.55);
+          background: rgba(15, 23, 42, 0.72) !important;
           z-index: 1080;
           overflow-y: auto;
           display: flex;
@@ -1450,14 +1450,88 @@ export default function ApplicantDetailPage() {
           padding: 5vh 1rem;
           animation: confirmFadeIn 0.15s ease-out;
         }
-        .confirm-modal-dialog {
+
+        .confirm-modal-card {
+          position: relative;
+          z-index: 1;
           width: 100%;
           max-width: 480px;
-        }
-        .confirm-modal-dialog .modal-content {
+          background-color: #ffffff !important;
+          background-image: none !important;
+          color: #1a2a44 !important;
+          opacity: 1 !important;
+          border: 1px solid #d7e0ea;
           border-radius: 0.75rem;
+          box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.45);
+          isolation: isolate;
           animation: confirmPopIn 0.18s ease-out;
         }
+
+        .confirm-modal-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 0.5rem;
+          padding: 1rem 1.25rem;
+          background-color: #f5f9ff !important;
+          border-bottom: 1px solid #e4e9f0;
+          border-radius: 0.75rem 0.75rem 0 0;
+        }
+
+        .confirm-modal-title {
+          margin: 0;
+          font-size: 1.05rem;
+          font-weight: 700;
+          color: #1a2a44 !important;
+          display: flex;
+          align-items: center;
+        }
+
+        .confirm-modal-body {
+          padding: 1rem 1.25rem;
+          background-color: #ffffff !important;
+          color: #1a2a44 !important;
+        }
+
+        .confirm-modal-body p,
+        .confirm-modal-body label,
+        .confirm-modal-body code {
+          color: #1a2a44 !important;
+        }
+
+        .confirm-modal-body .text-muted {
+          color: #6c7a92 !important;
+        }
+
+        .confirm-modal-body code {
+          background: #eef2f7 !important;
+          padding: 0.05rem 0.35rem;
+          border-radius: 0.25rem;
+        }
+
+        .confirm-modal-body .form-control {
+          background-color: #ffffff !important;
+          color: #1a2a44 !important;
+          border: 1px solid #c7d2dd;
+        }
+
+        .confirm-modal-body .form-control:focus {
+          background-color: #ffffff !important;
+          color: #1a2a44 !important;
+          border-color: #0056b3;
+          box-shadow: 0 0 0 0.2rem rgba(0, 86, 179, 0.15);
+        }
+
+        .confirm-modal-footer {
+          display: flex;
+          justify-content: flex-end;
+          gap: 0.5rem;
+          padding: 0.85rem 1.25rem;
+          background-color: #f5f9ff !important;
+          border-top: 1px solid #e4e9f0;
+          border-radius: 0 0 0.75rem 0.75rem;
+        }
+
         @keyframes confirmFadeIn {
           from { opacity: 0; }
           to   { opacity: 1; }
@@ -1517,95 +1591,95 @@ function ConfirmActionModal({
         if (e.target === e.currentTarget && !busy) onCancel()
       }}
     >
-      <div className="confirm-modal-dialog">
-        <div className="modal-content shadow-lg border-0">
-          <div className="modal-header">
-            <h5
-              className="modal-title d-flex align-items-center gap-2"
-              id="confirm-modal-title"
-            >
-              <i className="bi bi-shield-exclamation text-warning" />
-              Confirm {displayLabel}
-            </h5>
-            <button
-              type="button"
-              className="btn-close"
-              onClick={onCancel}
-              disabled={busy}
-              aria-label="Close"
-            />
-          </div>
-          <div className="modal-body">
-            <p className="mb-2">
-              You&rsquo;re about to mark this application as{' '}
-              <strong>{displayLabel}</strong>.
-            </p>
-            <p className="mb-3 small text-muted">
-              This action is <strong>permanent</strong> and cannot be undone
-              from this page. To avoid accidental presses, type{' '}
-              <code className="fw-bold">{requiredWord}</code> in the box
-              below and click the confirm button.
-            </p>
-            <label className="form-label small fw-semibold">
-              Type <code>{requiredWord}</code> to confirm
-            </label>
-            <input
-              type="text"
-              className={`form-control ${showMismatch ? 'is-invalid' : ''}`}
-              value={input}
-              onChange={(e) => onInput(e.target.value)}
-              placeholder={requiredWord}
-              autoFocus
-              disabled={busy}
-              autoComplete="off"
-              spellCheck={false}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && matches && !busy) {
-                  e.preventDefault()
-                  onConfirm()
-                }
-              }}
-            />
-            {showMismatch && (
-              <div className="invalid-feedback d-block">
-                Doesn&rsquo;t match. Type <strong>{requiredWord}</strong> exactly
-                (case-insensitive).
-              </div>
+      <div className="confirm-modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="confirm-modal-header">
+          <h5
+            className="confirm-modal-title"
+            id="confirm-modal-title"
+          >
+            <i className="bi bi-shield-exclamation text-warning me-2" />
+            Confirm {displayLabel}
+          </h5>
+          <button
+            type="button"
+            className="btn-close"
+            onClick={onCancel}
+            disabled={busy}
+            aria-label="Close"
+          />
+        </div>
+
+        <div className="confirm-modal-body">
+          <p className="mb-2">
+            You&rsquo;re about to mark this application as{' '}
+            <strong>{displayLabel}</strong>.
+          </p>
+          <p className="mb-3 small text-muted">
+            This action is <strong>permanent</strong> and cannot be undone
+            from this page. To avoid accidental presses, type{' '}
+            <code className="fw-bold">{requiredWord}</code> in the box
+            below and click the confirm button.
+          </p>
+          <label className="form-label small fw-semibold">
+            Type <code>{requiredWord}</code> to confirm
+          </label>
+          <input
+            type="text"
+            className={`form-control ${showMismatch ? 'is-invalid' : ''}`}
+            value={input}
+            onChange={(e) => onInput(e.target.value)}
+            placeholder={requiredWord}
+            autoFocus
+            disabled={busy}
+            autoComplete="off"
+            spellCheck={false}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && matches && !busy) {
+                e.preventDefault()
+                onConfirm()
+              }
+            }}
+          />
+          {showMismatch && (
+            <div className="invalid-feedback d-block">
+              Doesn&rsquo;t match. Type <strong>{requiredWord}</strong> exactly
+              (case-insensitive).
+            </div>
+          )}
+          {error && (
+            <div className="mt-3">
+              <Alert variant="danger" message={error} />
+            </div>
+          )}
+        </div>
+
+        <div className="confirm-modal-footer">
+          <button
+            type="button"
+            className="btn btn-soft"
+            onClick={onCancel}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className={`btn ${btnVariant}`}
+            onClick={onConfirm}
+            disabled={!matches || busy}
+          >
+            {busy ? (
+              <>
+                <span className="spinner-border spinner-border-sm me-1" />
+                Saving…
+              </>
+            ) : (
+              <>
+                <i className="bi bi-shield-check me-1" />
+                Yes, {displayLabel.toLowerCase()}
+              </>
             )}
-            {error && (
-              <div className="mt-3">
-                <Alert variant="danger" message={error} />
-              </div>
-            )}
-          </div>
-          <div className="modal-footer">
-            <button
-              type="button"
-              className="btn btn-soft"
-              onClick={onCancel}
-              disabled={busy}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className={`btn ${btnVariant}`}
-              onClick={onConfirm}
-              disabled={!matches || busy}
-            >
-              {busy ? (
-                <>
-                  <span className="spinner-border spinner-border-sm me-1" />
-                  Saving…
-                </>
-              ) : (
-                <>
-                  <i className="bi bi-shield-check me-1" />
-                  Yes, {displayLabel.toLowerCase()}
-                </>
-              )}
-            </button>
-          </div>
+          </button>
         </div>
       </div>
     </div>,
