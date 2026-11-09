@@ -6,33 +6,48 @@ import { useAuth } from '../../lib/auth'
 type Slot = 'id' | 'birth_cert' | 'medical_abstract'
 
 const SLOTS: { key: Slot; label: string; hint: string }[] = [
-  { key: 'id',               label: 'Valid ID',          hint: "Driver's license, PhilSys, passport, UMID" },
-  { key: 'birth_cert',       label: 'Birth certificate', hint: 'PSA-issued' },
-  { key: 'medical_abstract', label: 'Medical abstract',  hint: 'Signed by your physician' },
+  { key: 'id',               label: 'Valid ID',          hint: "Driver's license, PhilSys, passport, UMID — PNG only" },
+  { key: 'birth_cert',       label: 'Birth certificate', hint: 'PSA-issued — PNG only' },
+  { key: 'medical_abstract', label: 'Medical abstract',  hint: 'Signed by your physician — PNG only' },
 ]
 
-// ─── NEW: allowed file types (PDF / JPG / PNG only) ───
-const ALLOWED_MIME = ['application/pdf', 'image/jpeg', 'image/png'] as const
+// ─── allowed file types (PNG only, everywhere) ───
+const ALLOWED_MIME = ['image/png'] as const
 type AllowedMime = (typeof ALLOWED_MIME)[number]
 
+// ─── per-slot allowlist (all PNG only) ───
+const SLOT_MIME: Record<Slot, readonly AllowedMime[]> = {
+  id:               ['image/png'],
+  birth_cert:       ['image/png'],
+  medical_abstract: ['image/png'],
+}
+
 const EXT_BY_MIME: Record<AllowedMime, string> = {
-  'application/pdf': 'pdf',
-  'image/jpeg': 'jpg',
   'image/png': 'png',
 }
 
 // Some browsers/OSes leave file.type empty, so fall back to the extension
 const EXT_TO_MIME: Record<string, AllowedMime> = {
-  pdf: 'application/pdf',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
   png: 'image/png',
 }
 
-function resolveMime(file: File): AllowedMime | null {
-  if (ALLOWED_MIME.includes(file.type as AllowedMime)) return file.type as AllowedMime
+const MIME_TO_EXT: Record<AllowedMime, string[]> = {
+  'image/png': ['.png'],
+}
+
+function acceptFor(slot: Slot): string {
+  return SLOT_MIME[slot].flatMap(m => [m, ...MIME_TO_EXT[m]]).join(',')
+}
+
+function resolveMime(file: File, slot: Slot): AllowedMime | null {
+  const byType = ALLOWED_MIME.includes(file.type as AllowedMime)
+    ? (file.type as AllowedMime)
+    : null
   const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
-  return EXT_TO_MIME[ext] ?? null
+  const mime = byType ?? EXT_TO_MIME[ext] ?? null
+  if (!mime) return null
+  // slot gate: reject anything not allowed for this specific slot
+  return SLOT_MIME[slot].includes(mime) ? mime : null
 }
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024 // 10 MB
@@ -45,7 +60,7 @@ export default function VerifyPage() {
   const [consent, setConsent] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // ─── NEW: phone state (prefilled if user already has one from a previous attempt) ───
+  // phone state (prefilled if user already has one from a previous attempt)
   const [phone, setPhone] = useState(profile?.phone ?? '')
   const [submitting, setSubmitting] = useState(false)
 
@@ -70,14 +85,14 @@ export default function VerifyPage() {
     if (!user) return
     setError(null)
 
-    // ─── NEW: enforce PDF / JPG / PNG ───
-    const mime = resolveMime(file)
+    // enforce PNG-only for every slot
+    const mime = resolveMime(file, slot)
     if (!mime) {
-      setError('Only PDF, JPG, or PNG files are allowed.')
+      setError('Only PNG files are allowed.')
       return
     }
 
-    // ─── NEW: enforce max size ───
+    // enforce max size
     if (file.size > MAX_FILE_BYTES) {
       setError('File must be 10 MB or smaller.')
       return
@@ -101,6 +116,12 @@ export default function VerifyPage() {
         )
       if (dbErr) throw dbErr
 
+      // if the previous upload used a different extension, clean up the orphan
+      const previous = uploaded[slot]
+      if (previous && previous !== path) {
+        await supabase.storage.from('verification-docs').remove([previous])
+      }
+
       setUploaded(u => ({ ...u, [slot]: path }))
     } catch (e: any) {
       setError(e.message ?? 'Upload failed.')
@@ -112,13 +133,13 @@ export default function VerifyPage() {
   async function submit() {
     if (!consent) return setError('Please give consent to process your documents.')
     if (Object.keys(uploaded).length < 3) return setError('Please upload all three documents.')
-    // ─── NEW: phone required before submission ───
+    // phone required before submission
     if (!phoneValid) return setError('Please enter a valid PH mobile number (e.g., 0917 123 4567).')
 
     setSubmitting(true)
     setError(null)
 
-    // ─── NEW: save phone to profiles BEFORE the RPC, so the admin reviewer sees it ───
+    // save phone to profiles BEFORE the RPC, so the admin reviewer sees it.
     // We save first because the SMS on approval depends on this number being present.
     if (user) {
       const { error: phoneErr } = await supabase
@@ -153,7 +174,7 @@ export default function VerifyPage() {
         <h3 className="mb-1">Verify your identity</h3>
         <p className="text-muted mb-0">
           Upload the three documents below. An administrator will review them
-          before your account is activated.
+          before your account is activated. All documents must be PNG images.
         </p>
       </div>
 
@@ -178,7 +199,7 @@ export default function VerifyPage() {
                   <i className="bi bi-upload me-1" /> Choose file
                   <input
                     type="file"
-                    accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png"
+                    accept={acceptFor(s.key)}
                     hidden
                     onChange={e => {
                       const f = e.target.files?.[0]
@@ -194,7 +215,7 @@ export default function VerifyPage() {
         </div>
       ))}
 
-      {/* ─── NEW: phone input — this is where the SMS on approval will go ─── */}
+      {/* phone input — this is where the SMS on approval will go */}
       <div className="card mb-3 shadow-sm border-0">
         <div className="card-body">
           <label className="form-label fw-semibold mb-1">
