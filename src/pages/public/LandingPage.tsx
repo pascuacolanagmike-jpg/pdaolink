@@ -26,7 +26,7 @@ export default function LandingPage() {
             <div className="container-fluid px-3 px-lg-4">
               <span className="navbar-brand d-flex align-items-center gap-2">
                 <img
-                 src="/images/PDAOLinklogo.png"
+                 src="https://ibb.co/wr8pcmP7"
                   alt="PDAOLink Logo"
                   style={{
                     width: 36,
