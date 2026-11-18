@@ -3,6 +3,7 @@ import { type Application, appFullName, fmtDate } from '../lib/types'
 // Back EID background image — imported as a module so the bundler
 // resolves it correctly on localhost AND on GitHub Pages / any deploy.
 import backEidImage from '../pages/public/images/20260913849d1475-9ccb-4eae-811a-06546c6317c0.jpeg'
+import frontEidImage from '../pages/public/images/2026/11/17/pwd-front.jpeg'
 
 interface EidCardProps {
   application: Application
