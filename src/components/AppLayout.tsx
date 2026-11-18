@@ -58,7 +58,7 @@ export default function AppLayout({ navItems, children }: AppLayoutProps) {
           </button>
           <Navbar.Brand as={Link} to={homeLink} className="d-flex align-items-center gap-2">
             <img
-              src="https://cdn.postimage.me/2026/09/13/cropped_circle_image-1.png"
+              src="https://www.hostimage.org/images/2026/11/17/PDAOLinklogo.jpeg"
               alt="PDAOLink Logo"
               style={{
                 width: 36,
