@@ -189,7 +189,16 @@ export default function EidCard({
 
   const frontInner = (
     <>
-      <img src="https://cdn.postimage.me/2026/09/13/pwd-front.jpeg" alt="" className="eid-bg" />
+      {/* ✅ Updated front background — hosted on hostimage.org */}
+      <img
+        src="https://www.hostimage.org/images/2026/11/17/pwd-front.jpeg"
+        alt=""
+        className="eid-bg"
+        onError={(e) => {
+          // Fallback: kung mabigo ang image, huwag hayaang mag-blangko
+          ;(e.currentTarget as HTMLImageElement).style.display = 'none'
+        }}
+      />
 
       <div className="eid-text eid-text-center field-front-name">
         {fullName}
