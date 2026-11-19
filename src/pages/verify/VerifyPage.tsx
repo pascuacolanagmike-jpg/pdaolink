@@ -286,7 +286,7 @@ export default function VerifyPage() {
     <div className="container py-5" style={{ maxWidth: 720 }}>
       <div className="text-center mb-4">
         <img
-          src="https://cdn.postimage.me/2026/09/13/cropped_circle_image-1.png"
+          src="https://www.hostimage.org/images/2026/11/18/logo.png"
           alt="PDAOLink"
           className="mb-3"
           style={{ width: 56, height: 56, borderRadius: 14, objectFit: 'cover' }}
